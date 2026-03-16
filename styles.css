@@ -198,6 +198,21 @@ select {
   align-items: flex-start;
 }
 
+.player-heading {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.player-summary-right {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
 .player-label,
 .turn-label,
 .stat-label {
@@ -210,6 +225,42 @@ select {
 
 .player-summary h2 {
   margin: 4px 0 0;
+}
+
+.player-name-button {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font-size: clamp(1.7rem, 3vw, 2.3rem);
+  font-weight: 700;
+  line-height: 1.05;
+  text-align: left;
+  transition: color 150ms ease, transform 150ms ease, text-shadow 150ms ease;
+}
+
+.player-name-button:disabled {
+  opacity: 1;
+  cursor: default;
+}
+
+.player-name-button.targetable-name {
+  cursor: pointer;
+  text-shadow: 0 0 18px rgba(244, 184, 96, 0.18);
+}
+
+.player-name-button.targetable-name:hover {
+  transform: translateY(-1px);
+}
+
+.player-name-button.targetable-name-attack {
+  color: #ffdcb0;
+  text-shadow: 0 0 18px rgba(255, 140, 66, 0.32);
+}
+
+.player-name-button.targetable-name-heal {
+  color: #c8ffe6;
+  text-shadow: 0 0 18px rgba(127, 231, 195, 0.3);
 }
 
 .stat-group {
@@ -233,28 +284,31 @@ select {
   margin-top: 4px;
 }
 
-.player-actions-slot[hidden] {
+.player-turn-actions-slot[hidden],
+.player-cancel-slot[hidden],
+#player-turn-actions-panel[hidden] {
   display: none !important;
 }
 
-.player-actions {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+.player-turn-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
   gap: 10px;
 }
 
-.player-actions #restart-button {
-  grid-column: 1 / -1;
+.player-turn-actions .action-button {
+  width: auto;
+  min-width: 148px;
 }
 
 .player-grid {
-  display: grid;
-  grid-template-columns: minmax(120px, 0.85fr) minmax(120px, 0.85fr) minmax(300px, 2.4fr);
+  display: flex;
+  flex-direction: column;
   gap: 14px;
-  align-items: start;
 }
 
-.player-column,
+.player-section,
 .hand-type-group {
   display: flex;
   flex-direction: column;
@@ -284,9 +338,13 @@ select {
 
 .zone,
 .typed-hand {
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
   gap: 10px;
+}
+
+.typed-hand {
+  grid-template-columns: 1fr;
 }
 
 #turn-status {
@@ -331,6 +389,16 @@ select {
   opacity: 0.45;
   cursor: not-allowed;
   transform: none;
+}
+
+.player-cancel-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.player-cancel-actions .action-button {
+  width: auto;
+  min-width: 160px;
 }
 
 .deck-stat {
@@ -699,8 +767,9 @@ select {
 }
 
 @media (max-width: 1180px) {
-  .player-grid {
-    grid-template-columns: 1fr;
+  .player-summary-right {
+    width: 100%;
+    justify-content: flex-start;
   }
 }
 
@@ -720,12 +789,14 @@ select {
     grid-template-columns: 1fr;
   }
 
-  .player-actions {
-    grid-template-columns: 1fr;
+  .player-turn-actions,
+  .player-cancel-actions {
+    justify-content: stretch;
   }
 
-  .player-actions #restart-button {
-    grid-column: auto;
+  .player-turn-actions .action-button,
+  .player-cancel-actions .action-button {
+    width: 100%;
   }
 }
 

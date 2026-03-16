@@ -127,6 +127,22 @@ test("keyboard shortcut a attacks the rival player with the selected unit", () =
   assert(state.players[0].board[0].jaAtacouNoTurno === true, "shortcut attack should spend the unit attack");
 });
 
+test("player header target mode exposes attack and heal player targets", () => {
+  const attackState = game.createInitialState();
+  attackState.selectedAttackerId = "atk";
+
+  assert(game.getPlayerHeaderTargetMode(attackState, 0) === null, "own header should not be attackable");
+  assert(game.getPlayerHeaderTargetMode(attackState, 1) === "attack", "enemy header should become an attack target");
+
+  const healState = game.createInitialState();
+  healState.selectedEffectCard = {
+    efeito: "cura_direta"
+  };
+
+  assert(game.getPlayerHeaderTargetMode(healState, 0) === "heal", "current player header should become a heal target");
+  assert(game.getPlayerHeaderTargetMode(healState, 1) === null, "opponent header should not become a heal target");
+});
+
 test("keyboard shortcut e ends the turn", () => {
   const state = game.createInitialState();
 

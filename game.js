@@ -789,6 +789,30 @@
     return Boolean(state.isLibraryOpen || state.isRulesOpen || state.isLogOpen);
   }
 
+  function getPlayerHeaderTargetMode(state, targetPlayerIndex) {
+    if (state.winner) {
+      return null;
+    }
+
+    if (state.selectedEffectCard) {
+      if (state.selectedEffectCard.efeito === "dano_direto" && targetPlayerIndex !== state.currentPlayerIndex) {
+        return "attack";
+      }
+
+      if (state.selectedEffectCard.efeito === "cura_direta" && targetPlayerIndex === state.currentPlayerIndex) {
+        return "heal";
+      }
+
+      return null;
+    }
+
+    if (state.selectedAttackerId && targetPlayerIndex !== state.currentPlayerIndex) {
+      return "attack";
+    }
+
+    return null;
+  }
+
   function buildCardMarkup(card, player, options = {}) {
     const displayData = getCardDisplayData(card, player, options);
     const countMarkup = options.countLabel
@@ -938,6 +962,16 @@
       document.getElementById(`player-${player.id}-board-count`).textContent = `${player.board.length} em campo`;
       document.getElementById(`player-${player.id}-support-count`).textContent = `${player.supportZone.length} suportes`;
       document.getElementById(`player-${player.id}-mana`).textContent = `${player.manaAtual}/${player.manaMax}`;
+      const playerNameButton = document.getElementById(`player-${player.id}-name`);
+      const headerTargetMode = getPlayerHeaderTargetMode(state, index);
+
+      if (playerNameButton) {
+        playerNameButton.textContent = player.nome;
+        playerNameButton.disabled = !headerTargetMode;
+        playerNameButton.classList.toggle("targetable-name", Boolean(headerTargetMode));
+        playerNameButton.classList.toggle("targetable-name-attack", headerTargetMode === "attack");
+        playerNameButton.classList.toggle("targetable-name-heal", headerTargetMode === "heal");
+      }
 
       ["unidade", "suporte", "efeito"].forEach((category) => {
         document.getElementById(`player-${player.id}-hand-${category}-count`).textContent = String(groupedHand[category].length);
@@ -1028,12 +1062,12 @@
       ? "A partida terminou. Inicie uma nova partida para jogar novamente."
       : state.selectedEffectCard
         ? state.selectedEffectCard.efeito === "cura_direta"
-          ? "Escolha uma unidade aliada ou use o botao do painel para curar o jogador atual."
-          : "Escolha uma unidade inimiga ou use o botao do painel para atingir o jogador rival."
+          ? "Escolha uma unidade aliada ou clique no seu nome para curar o jogador atual."
+          : "Escolha uma unidade inimiga ou clique no nome do rival para causar dano."
         : state.selectedAttackerId
           ? getOpponentPlayer(state).board.length === 0 && getOpponentPlayer(state).supportZone.length > 0
-            ? "Escolha unidade, suporte exposto ou use o botao do painel para atacar o rival."
-            : "Escolha uma unidade inimiga ou use o botao do painel para atacar o rival."
+            ? "Escolha unidade, suporte exposto ou clique no nome do rival para atacar."
+            : "Escolha uma unidade inimiga ou clique no nome do rival para atacar."
           : "Use sua mana, baixe cartas e ataque com unidades prontas.";
     document.getElementById("deck-count").textContent = `${state.deck.length}/${getTotalDeckSize()}`;
     document.getElementById("discard-count").textContent = String(state.discardPile.length);
@@ -1065,32 +1099,43 @@
       toggleLogButton.setAttribute("aria-expanded", String(state.isLogOpen));
     }
 
-    const actionPanel = document.getElementById("player-actions-panel");
-    const playerOneActionSlot = document.getElementById("player-1-actions-slot");
-    const playerTwoActionSlot = document.getElementById("player-2-actions-slot");
+    const turnActionsPanel = document.getElementById("player-turn-actions-panel");
+    const playerOneTurnActionSlot = document.getElementById("player-1-turn-actions-slot");
+    const playerTwoTurnActionSlot = document.getElementById("player-2-turn-actions-slot");
+    const cancelActionsPanel = document.getElementById("player-cancel-actions-panel");
+    const playerOneCancelSlot = document.getElementById("player-1-cancel-slot");
+    const playerTwoCancelSlot = document.getElementById("player-2-cancel-slot");
 
-    if (actionPanel && playerOneActionSlot && playerTwoActionSlot) {
-      const activeActionSlot = currentPlayer.id === 1 ? playerOneActionSlot : playerTwoActionSlot;
-      const inactiveActionSlot = currentPlayer.id === 1 ? playerTwoActionSlot : playerOneActionSlot;
+    if (turnActionsPanel && playerOneTurnActionSlot && playerTwoTurnActionSlot) {
+      const activeTurnSlot = currentPlayer.id === 1 ? playerOneTurnActionSlot : playerTwoTurnActionSlot;
+      const inactiveTurnSlot = currentPlayer.id === 1 ? playerTwoTurnActionSlot : playerOneTurnActionSlot;
 
-      activeActionSlot.hidden = false;
-      inactiveActionSlot.hidden = true;
+      activeTurnSlot.hidden = false;
+      inactiveTurnSlot.hidden = true;
+      turnActionsPanel.hidden = false;
 
-      if (actionPanel.parentElement !== activeActionSlot) {
-        activeActionSlot.appendChild(actionPanel);
+      if (turnActionsPanel.parentElement !== activeTurnSlot) {
+        activeTurnSlot.appendChild(turnActionsPanel);
+      }
+    }
+
+    if (cancelActionsPanel && playerOneCancelSlot && playerTwoCancelSlot) {
+      const activeCancelSlot = currentPlayer.id === 1 ? playerOneCancelSlot : playerTwoCancelSlot;
+      const inactiveCancelSlot = currentPlayer.id === 1 ? playerTwoCancelSlot : playerOneCancelSlot;
+
+      activeCancelSlot.hidden = false;
+      inactiveCancelSlot.hidden = true;
+
+      if (cancelActionsPanel.parentElement !== activeCancelSlot) {
+        activeCancelSlot.appendChild(cancelActionsPanel);
       }
     }
 
     const drawButton = document.getElementById("draw-button");
-    const attackPlayerButton = document.getElementById("attack-player-button");
     const cancelAttackButton = document.getElementById("cancel-attack-button");
     const endTurnButton = document.getElementById("end-turn-button");
 
     drawButton.disabled = Boolean(state.winner) || Boolean(state.selectedAttackerId) || Boolean(state.selectedEffectCard) || !state.deck.length || !canAfford(currentPlayer, DRAW_COST);
-    attackPlayerButton.disabled = Boolean(state.winner) || (!state.selectedAttackerId && !state.selectedEffectCard);
-    attackPlayerButton.textContent = state.selectedEffectCard && state.selectedEffectCard.efeito === "cura_direta"
-      ? "Curar jogador"
-      : "Atacar jogador";
     cancelAttackButton.disabled = !state.selectedAttackerId && !state.selectedEffectCard;
     endTurnButton.disabled = Boolean(state.winner);
     endTurnButton.classList.toggle("ready-to-end-turn", !state.winner && !availableActions.hasAny);
@@ -1130,9 +1175,18 @@
       render(gameState);
     });
 
-      document.getElementById("attack-player-button").addEventListener("click", () => {
-      handleShortcutAction(gameState, "a");
-      render(gameState);
+    document.querySelectorAll(".player-name-button").forEach((button) => {
+      button.addEventListener("click", () => {
+        const targetPlayerIndex = Number(button.dataset.playerIndex);
+        const targetMode = getPlayerHeaderTargetMode(gameState, targetPlayerIndex);
+
+        if (!targetMode) {
+          return;
+        }
+
+        handleShortcutAction(gameState, "a");
+        render(gameState);
+      });
     });
 
     document.getElementById("cancel-attack-button").addEventListener("click", () => {
@@ -1205,6 +1259,7 @@
       getCardDisplayData,
       getCardOverlayData,
       getDeckCardCounts,
+      getPlayerHeaderTargetMode,
       groupHandByCategory,
       getTotalDeckSize,
       isAnySidePanelOpen,
