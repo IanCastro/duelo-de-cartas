@@ -853,10 +853,10 @@ test("layout markup removes the cancel button and keeps a pending effect slot", 
   assert(!html.includes("id=\"mana-display\""), "top bar should no longer render redundant mana");
   assert(html.includes("id=\"winner-modal\""), "winner modal markup should exist");
   assert(!html.includes("id=\"history-modal\""), "history preview should no longer use its own modal");
-  assert(html.includes("class=\"history-floating-panel\""), "history preview should render as a floating panel");
-  assert(html.includes("id=\"history-preview-panel\""), "history preview markup should exist");
-  assert(html.indexOf("id=\"history-preview-panel\"") > html.indexOf("</aside>"), "history preview should live outside the log rail");
-  assert(html.includes("id=\"resume-history-preview-button\""), "floating history preview should keep the continue action");
+  assert(!html.includes("class=\"history-floating-panel\""), "history preview should no longer render as a floating panel");
+  assert(!html.includes("id=\"history-preview-panel\""), "separate history preview markup should be removed");
+  assert(html.includes("id=\"history-view-banner\""), "history mode should render a top banner");
+  assert(html.includes("id=\"exit-history-view-button\""), "history mode should expose a way back to the present");
 });
 
 test("estandarte de guerra now costs 5 mana", () => {
@@ -1179,17 +1179,46 @@ test("log display helper shows the newest entry first without renumbering", () =
   assert(displayed[2].numero === 1, "oldest entry should render last");
 });
 
-test("history preview visibility depends on log panel and a selected entry", () => {
+test("history view depends on log panel and a selected entry", () => {
   const state = game.createInitialState();
 
-  assert(game.isHistoryPreviewVisible(state) === false, "preview should stay hidden with no selected line");
+  assert(game.isViewingHistory(state) === false, "history view should stay hidden with no selected line");
 
   state.selectedLogEntryId = 1;
-  assert(game.isHistoryPreviewVisible(state) === false, "preview should stay hidden while the log menu is closed");
+  assert(game.isViewingHistory(state) === false, "history view should stay hidden while the log menu is closed");
 
   state.isLogOpen = true;
-  assert(game.isHistoryPreviewVisible(state) === true, "preview should open only when the log is open and a line is selected");
+  assert(game.isViewingHistory(state) === true, "history view should open only when the log is open and a line is selected");
 
   state.selectedLogEntryId = 999;
-  assert(game.isHistoryPreviewVisible(state) === false, "preview should hide again if the selected entry no longer exists");
+  assert(game.isViewingHistory(state) === false, "history view should hide again if the selected entry no longer exists");
+});
+
+test("rendered game state returns the selected snapshot without mutating the live state", () => {
+  const state = game.createInitialState();
+  const liveHandSize = state.players[0].hand.length;
+
+  state.players[0].manaAtual = 2;
+  state.players[0].manaMax = 2;
+  game.drawTurnCard(state, 0);
+  state.isLogOpen = true;
+  state.selectedLogEntryId = 1;
+
+  const rendered = game.getRenderedGameState(state);
+
+  assert(rendered.players[0].hand.length === liveHandSize, "rendered state should show the selected snapshot hand");
+  assert(state.players[0].hand.length === liveHandSize + 1, "live state should keep the current hand untouched");
+});
+
+test("history view blocks keyboard shortcuts that would mutate the live game", () => {
+  const state = game.createInitialState();
+  const handSizeBefore = state.players[0].hand.length;
+
+  state.isLogOpen = true;
+  state.selectedLogEntryId = 1;
+
+  const handled = game.handleShortcutAction(state, "c");
+
+  assert(handled === false, "shortcut should be ignored while viewing history");
+  assert(state.players[0].hand.length === handSizeBefore, "blocked shortcut should not change the live game");
 });

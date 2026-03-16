@@ -58,6 +58,18 @@
       </div>
     </section>
 
+    <section class="history-view-banner" id="history-view-banner" aria-hidden="true" hidden>
+      <div class="history-view-copy">
+        <p class="turn-label">Modo de inspecao</p>
+        <h3 id="history-view-title">Visualizando a acao 1 do log</h3>
+        <p id="history-view-text">Este e um momento passado. A partida atual nao foi alterada.</p>
+      </div>
+      <div class="history-view-actions">
+        <button id="exit-history-view-button" class="action-button secondary" type="button">Voltar ao presente</button>
+        <button id="rewind-history-button" class="action-button" type="button">Voltar para este momento</button>
+      </div>
+    </section>
+
     <section class="board">
       <article class="player-panel" id="player-top-panel">
         <div class="player-summary">
@@ -225,36 +237,6 @@
           <div id="game-log"></div>
         </section>
       </aside>
-
-      <section class="history-floating-panel" id="history-preview-panel" aria-hidden="true" hidden>
-        <div class="history-floating-header">
-          <div>
-            <p class="player-label">Linha do log</p>
-            <h3 id="history-preview-title">Estado da partida</h3>
-          </div>
-          <button id="close-history-preview-button" class="library-toggle modal-close" type="button">Fechar</button>
-        </div>
-        <p id="history-preview-text" class="modal-copy"></p>
-        <div class="history-preview-meta">
-          <div class="deck-stat">
-            <span>Turno</span>
-            <strong id="history-preview-turn">-</strong>
-          </div>
-          <div class="deck-stat">
-            <span>Baralho</span>
-            <strong id="history-preview-deck">-</strong>
-          </div>
-          <div class="deck-stat">
-            <span>Descarte</span>
-            <strong id="history-preview-discard">-</strong>
-          </div>
-        </div>
-        <div class="history-preview-grid" id="history-preview-grid"></div>
-        <div class="modal-actions history-floating-actions">
-          <button id="rewind-history-button" class="action-button" type="button">Voltar para este momento</button>
-          <button id="resume-history-preview-button" class="action-button secondary" type="button">Continuar a partida atual</button>
-        </div>
-      </section>
     </section>
 
     <div class="player-turn-actions" id="player-turn-actions-panel" hidden>

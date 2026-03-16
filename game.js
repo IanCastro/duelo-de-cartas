@@ -746,7 +746,7 @@
   function handleShortcutAction(state, shortcutKey, options = {}) {
     const normalizedKey = typeof shortcutKey === "string" ? shortcutKey.toLowerCase() : "";
 
-    if (options.repeat || isInteractiveShortcutTarget(options.target)) {
+    if (options.repeat || isInteractiveShortcutTarget(options.target) || isViewingHistory(state)) {
       return false;
     }
 
@@ -1278,10 +1278,66 @@
     });
   }
 
-  function render(state) {
-    const currentPlayer = getCurrentPlayer(state);
+  function isViewingHistory(state) {
+    return Boolean(state && state.isLogOpen && getSelectedLogEntry(state));
+  }
 
-    state.players.forEach((player, index) => {
+  function getRenderedGameState(state) {
+    const selectedEntry = getSelectedLogEntry(state);
+
+    if (!state || !state.isLogOpen || !selectedEntry) {
+      return state;
+    }
+
+    const snapshot = selectedEntry.snapshot;
+    const players = cloneData(snapshot.players);
+    const renderedState = {
+      ...state,
+      deck: cloneData(snapshot.deck),
+      discardPile: cloneData(snapshot.discardPile),
+      currentPlayerIndex: snapshot.currentPlayerIndex,
+      selectedAttackerId: snapshot.selectedAttackerId,
+      selectedEffectCard: cloneData(snapshot.selectedEffectCard),
+      turnNumber: snapshot.turnNumber,
+      players
+    };
+
+    renderedState.winner = snapshot.winnerPlayerId
+      ? renderedState.players.find((player) => player.id === snapshot.winnerPlayerId) || null
+      : null;
+
+    return renderedState;
+  }
+
+  function renderHistoryViewBanner(state) {
+    const banner = document.getElementById("history-view-banner");
+    const title = document.getElementById("history-view-title");
+    const text = document.getElementById("history-view-text");
+
+    if (!banner || !title || !text) {
+      return;
+    }
+
+    const selectedEntry = getSelectedLogEntry(state);
+    const isVisible = Boolean(state.isLogOpen && selectedEntry);
+
+    banner.hidden = !isVisible;
+    banner.setAttribute("aria-hidden", String(!isVisible));
+
+    if (!isVisible || !selectedEntry) {
+      return;
+    }
+
+    title.textContent = `Visualizando a acao ${selectedEntry.numero} do log`;
+    text.textContent = `${selectedEntry.texto} Este e um momento passado. A partida atual nao foi alterada.`;
+  }
+
+  function render(state) {
+    const viewingHistory = isViewingHistory(state);
+    const renderedState = getRenderedGameState(state);
+    const currentPlayer = getCurrentPlayer(renderedState);
+
+    renderedState.players.forEach((player, index) => {
       const groupedHand = groupHandByCategory(player.hand);
       document.getElementById(`player-${player.id}-health`).textContent = formatPlayerHealth(player);
       document.getElementById(`player-${player.id}-hand-count`).textContent = `${player.hand.length} cartas`;
@@ -1290,7 +1346,7 @@
       document.getElementById(`player-${player.id}-mana`).textContent = `${player.manaAtual}/${player.manaMax}`;
       const playerNameButton = document.getElementById(`player-${player.id}-name`);
       const playerTargetHint = document.getElementById(`player-${player.id}-target-hint`);
-      const headerTargetMode = getPlayerHeaderTargetMode(state, index);
+      const headerTargetMode = viewingHistory ? null : getPlayerHeaderTargetMode(state, index);
 
       if (playerNameButton) {
         playerNameButton.textContent = player.nome;
@@ -1314,7 +1370,7 @@
           `player-${player.id}-hand-${category}`,
           groupedHand[category],
           (card) => createCardElement(card, {
-            interactive: canPlayCard(state, index, card),
+            interactive: !viewingHistory && canPlayCard(state, index, card),
             className: player.id === 2 ? "opponent-card" : "",
             player,
             onClick: () => {
@@ -1334,12 +1390,12 @@
         `player-${player.id}-board`,
         player.board,
         (card) => {
-          const isCurrentPlayer = index === state.currentPlayerIndex;
-          const isSelected = card.instanceId === state.selectedAttackerId;
-          const canSelect = isCurrentPlayer && !state.winner && card.podeAgir && !card.jaAtacouNoTurno && !state.selectedEffectCard;
-          const canBeCombatTargeted = !isCurrentPlayer && Boolean(state.selectedAttackerId) && !state.winner;
-          const canBeDamageEffectTargeted = !isCurrentPlayer && Boolean(state.selectedEffectCard) && state.selectedEffectCard.efeito === "dano_direto" && !state.winner;
-          const canBeHealingEffectTargeted = isCurrentPlayer
+          const isCurrentPlayer = index === renderedState.currentPlayerIndex;
+          const isSelected = !viewingHistory && card.instanceId === state.selectedAttackerId;
+          const canSelect = !viewingHistory && isCurrentPlayer && !state.winner && card.podeAgir && !card.jaAtacouNoTurno && !state.selectedEffectCard;
+          const canBeCombatTargeted = !viewingHistory && !isCurrentPlayer && Boolean(state.selectedAttackerId) && !state.winner;
+          const canBeDamageEffectTargeted = !viewingHistory && !isCurrentPlayer && Boolean(state.selectedEffectCard) && state.selectedEffectCard.efeito === "dano_direto" && !state.winner;
+          const canBeHealingEffectTargeted = !viewingHistory && isCurrentPlayer
             && Boolean(state.selectedEffectCard)
             && state.selectedEffectCard.efeito === "cura_direta"
             && !state.winner
@@ -1371,8 +1427,9 @@
         `player-${player.id}-support`,
         player.supportZone,
         (card) => {
-          const isCurrentPlayer = index === state.currentPlayerIndex;
-          const canBeSupportTargeted = !isCurrentPlayer
+          const isCurrentPlayer = index === renderedState.currentPlayerIndex;
+          const canBeSupportTargeted = !viewingHistory
+            && !isCurrentPlayer
             && Boolean(state.selectedAttackerId)
             && !state.selectedEffectCard
             && !state.winner
@@ -1394,9 +1451,13 @@
       );
     });
 
-    const availableActions = getAvailableActions(state, state.currentPlayerIndex);
-    document.getElementById("turn-indicator").textContent = state.winner ? `${state.winner.nome} venceu` : currentPlayer.nome;
-    document.getElementById("turn-status").textContent = state.winner
+    const availableActions = viewingHistory
+      ? { hasAny: false }
+      : getAvailableActions(state, state.currentPlayerIndex);
+    document.getElementById("turn-indicator").textContent = renderedState.winner ? `${renderedState.winner.nome} venceu` : currentPlayer.nome;
+    document.getElementById("turn-status").textContent = viewingHistory
+      ? "Visualizando um momento passado em somente leitura."
+      : state.winner
       ? "A partida terminou. Inicie uma nova partida para jogar novamente."
       : state.selectedEffectCard
         ? state.selectedEffectCard.efeito === "cura_direta"
@@ -1407,8 +1468,8 @@
             ? "Escolha unidade, suporte exposto ou clique no nome do rival para atacar o jogador. Clique novamente na unidade para cancelar."
             : "Escolha uma unidade inimiga ou clique no nome do rival para atacar o jogador. Clique novamente na unidade para cancelar."
           : "Use sua mana, baixe cartas e ataque com unidades prontas.";
-    document.getElementById("deck-count").textContent = `${state.deck.length}/${getTotalDeckSize()}`;
-    document.getElementById("discard-count").textContent = String(state.discardPile.length);
+    document.getElementById("deck-count").textContent = `${renderedState.deck.length}/${getTotalDeckSize()}`;
+    document.getElementById("discard-count").textContent = String(renderedState.discardPile.length);
     document.getElementById("attacks-left").textContent = String(getAvailableAttackers(currentPlayer).length);
     document.getElementById("winner-banner").textContent = state.winner ? `${state.winner.nome} venceu` : "Sem vencedor";
 
@@ -1421,12 +1482,10 @@
     const toggleRulesButton = document.getElementById("toggle-rules-button");
     const toggleLogButton = document.getElementById("toggle-log-button");
     const anySidePanelOpen = isAnySidePanelOpen(state);
-    const historyPreviewVisible = isHistoryPreviewVisible(state);
-    const historyPreviewPanel = document.getElementById("history-preview-panel");
 
     if (boardElement && sideRail && libraryPanel && rulesPanel && logPanel && toggleLibraryButton && toggleRulesButton && toggleLogButton) {
       boardElement.classList.toggle("board-with-side-rail", anySidePanelOpen);
-      boardElement.classList.toggle("board-with-history-preview", historyPreviewVisible);
+      boardElement.classList.toggle("is-history-view", viewingHistory);
       sideRail.setAttribute("aria-hidden", String(!anySidePanelOpen));
       libraryPanel.setAttribute("aria-hidden", String(!state.isLibraryOpen));
       rulesPanel.setAttribute("aria-hidden", String(!state.isRulesOpen));
@@ -1437,11 +1496,6 @@
       toggleLibraryButton.setAttribute("aria-expanded", String(state.isLibraryOpen));
       toggleRulesButton.setAttribute("aria-expanded", String(state.isRulesOpen));
       toggleLogButton.setAttribute("aria-expanded", String(state.isLogOpen));
-    }
-
-    if (historyPreviewPanel) {
-      historyPreviewPanel.hidden = !historyPreviewVisible;
-      historyPreviewPanel.setAttribute("aria-hidden", String(!historyPreviewVisible));
     }
 
     const turnActionsPanel = document.getElementById("player-turn-actions-panel");
@@ -1470,7 +1524,10 @@
       inactivePendingSlot.hidden = true;
       inactivePendingSlot.innerHTML = "";
 
-      if (state.selectedEffectCard) {
+      if (viewingHistory) {
+        activePendingSlot.hidden = true;
+        activePendingSlot.innerHTML = "";
+      } else if (state.selectedEffectCard) {
         activePendingSlot.hidden = false;
         activePendingSlot.innerHTML = "";
         activePendingSlot.appendChild(createCardElement(state.selectedEffectCard, {
@@ -1492,9 +1549,9 @@
     const drawButton = document.getElementById("draw-button");
     const endTurnButton = document.getElementById("end-turn-button");
 
-    drawButton.disabled = Boolean(state.winner) || Boolean(state.selectedAttackerId) || Boolean(state.selectedEffectCard) || !state.deck.length || !canAfford(currentPlayer, DRAW_COST);
-    endTurnButton.disabled = Boolean(state.winner);
-    endTurnButton.classList.toggle("ready-to-end-turn", !state.winner && !availableActions.hasAny);
+    drawButton.disabled = viewingHistory || Boolean(state.winner) || Boolean(state.selectedAttackerId) || Boolean(state.selectedEffectCard) || !state.deck.length || !canAfford(getCurrentPlayer(state), DRAW_COST);
+    endTurnButton.disabled = viewingHistory || Boolean(state.winner);
+    endTurnButton.classList.toggle("ready-to-end-turn", !viewingHistory && !state.winner && !availableActions.hasAny);
 
     const logElement = document.getElementById("game-log");
     logElement.innerHTML = "";
@@ -1514,17 +1571,17 @@
     });
 
     renderLibrary(state);
-    renderHistoryPreview(state);
+    renderHistoryViewBanner(state);
 
-    document.getElementById("player-bottom-panel").classList.toggle("active", state.currentPlayerIndex === 0 && !state.winner);
-    document.getElementById("player-top-panel").classList.toggle("active", state.currentPlayerIndex === 1 && !state.winner);
+    document.getElementById("player-bottom-panel").classList.toggle("active", renderedState.currentPlayerIndex === 0 && !renderedState.winner);
+    document.getElementById("player-top-panel").classList.toggle("active", renderedState.currentPlayerIndex === 1 && !renderedState.winner);
 
     const winnerModal = document.getElementById("winner-modal");
     const winnerModalTitle = document.getElementById("winner-modal-title");
     const winnerModalText = document.getElementById("winner-modal-text");
 
     if (winnerModal && winnerModalTitle && winnerModalText) {
-      winnerModal.setAttribute("aria-hidden", String(!state.isWinnerModalOpen));
+      winnerModal.setAttribute("aria-hidden", String(viewingHistory || !state.isWinnerModalOpen));
       if (state.winner) {
         winnerModalTitle.textContent = `${state.winner.nome} venceu`;
         winnerModalText.textContent = `${state.winner.nome} reduziu a vida rival a zero e venceu a partida.`;
@@ -1588,12 +1645,7 @@
       render(gameState);
     });
 
-    document.getElementById("close-history-preview-button").addEventListener("click", () => {
-      gameState.selectedLogEntryId = null;
-      render(gameState);
-    });
-
-    document.getElementById("resume-history-preview-button").addEventListener("click", () => {
+    document.getElementById("exit-history-view-button").addEventListener("click", () => {
       gameState.selectedLogEntryId = null;
       render(gameState);
     });
@@ -1671,7 +1723,8 @@
       restoreStateFromSnapshot,
       rewindToLogEntry,
       getDisplayLogEntries,
-      isHistoryPreviewVisible,
+      isViewingHistory,
+      getRenderedGameState,
       groupHandByCategory,
       getTotalDeckSize,
       isAnySidePanelOpen,
