@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Duelo de Cartas</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <main class="app-shell">
+    <header class="hero">
+      <p class="eyebrow">Jogo de cartas local</p>
+      <h1>Duelo de Cartas</h1>
+      <p class="subtitle">Baixe unidades para o campo, mantenha suportes ativos e escolha o momento certo para atacar.</p>
+      <button id="toggle-library-button" class="library-toggle" type="button" aria-expanded="false" aria-controls="library-panel">
+        Mostrar cartas
+      </button>
+    </header>
+
+    <section class="board">
+      <article class="player-panel" id="player-top-panel">
+        <div class="player-summary">
+          <div>
+            <p class="player-label">Jogador 2</p>
+            <h2 id="player-2-name">Guardiao Rubro</h2>
+          </div>
+          <div class="stat-group">
+            <div class="stat">
+              <span class="stat-label">Vida</span>
+              <strong id="player-2-health">40</strong>
+            </div>
+            <div class="stat">
+              <span class="stat-label">Mana</span>
+              <strong id="player-2-mana">0/0</strong>
+            </div>
+            <div class="stat">
+              <span class="stat-label">Campo</span>
+              <strong id="player-2-board-count">0 em campo</strong>
+            </div>
+            <div class="stat">
+              <span class="stat-label">Suporte</span>
+              <strong id="player-2-support-count">0 suportes</strong>
+            </div>
+          </div>
+        </div>
+
+        <div class="zone-wrapper">
+          <div class="hand-meta">
+            <span>Campo</span>
+            <span>Unidades ativas</span>
+          </div>
+          <div class="zone" id="player-2-board"></div>
+        </div>
+
+        <div class="zone-wrapper">
+          <div class="hand-meta">
+            <span>Suportes</span>
+            <span>Efeitos persistentes</span>
+          </div>
+          <div class="zone support-zone" id="player-2-support"></div>
+        </div>
+
+        <div class="hand-wrapper">
+          <div class="hand-meta">
+            <span>Mao</span>
+            <span id="player-2-hand-count">0 cartas</span>
+          </div>
+          <div class="hand opponent-hand" id="player-2-hand"></div>
+        </div>
+      </article>
+
+      <section class="center-panel">
+        <div class="turn-card">
+          <p class="turn-label">Turno atual</p>
+          <h2 id="turn-indicator">Jogador 1</h2>
+          <p id="turn-status">Escolha uma acao para este turno.</p>
+        </div>
+
+        <div class="action-panel">
+          <button id="draw-button" class="action-button">Comprar carta</button>
+          <button id="attack-player-button" class="action-button secondary">Atacar jogador</button>
+          <button id="cancel-attack-button" class="action-button ghost">Cancelar ataque</button>
+          <button id="end-turn-button" class="action-button secondary">Encerrar turno</button>
+          <button id="restart-button" class="action-button ghost">Nova partida</button>
+        </div>
+
+        <div class="deck-panel">
+          <div class="deck-stat">
+            <span>Baralho</span>
+            <strong id="deck-count">0</strong>
+          </div>
+          <div class="deck-stat">
+            <span>Mana</span>
+            <strong id="mana-display">0/0</strong>
+          </div>
+          <div class="deck-stat">
+            <span>Descarte</span>
+            <strong id="discard-count">0</strong>
+          </div>
+          <div class="deck-stat">
+            <span>Ataques livres</span>
+            <strong id="attacks-left">0</strong>
+          </div>
+        </div>
+
+        <section class="rules-panel">
+          <div class="hand-meta">
+            <span>Como jogar</span>
+            <span>Regras atuais</span>
+          </div>
+          <p>Cada jogador comeca com 40 de vida e 4 cartas na mao.</p>
+          <p>A mana aumenta a cada rodada ate 6. O segundo jogador recebe +1 de mana em todos os turnos para compensar a vantagem de comecar.</p>
+          <p>Unidades ficam em campo. Suportes permanecem ativos. Efeitos resolvem na hora e vao para o descarte.</p>
+          <p>Cada unidade pode atacar no turno em que entra em campo e depois 1 vez por turno. Cartas de dano direto podem atingir o jogador rival ou uma unidade inimiga. A cura imediata recupera 6.</p>
+        </section>
+
+        <section class="log-panel">
+          <div class="hand-meta">
+            <span>Log da partida</span>
+            <span id="winner-banner">Sem vencedor</span>
+          </div>
+          <ol id="game-log"></ol>
+        </section>
+      </section>
+
+      <article class="player-panel active" id="player-bottom-panel">
+        <div class="player-summary">
+          <div>
+            <p class="player-label">Jogador 1</p>
+            <h2 id="player-1-name">Sentinela Azul</h2>
+          </div>
+          <div class="stat-group">
+            <div class="stat">
+              <span class="stat-label">Vida</span>
+              <strong id="player-1-health">40</strong>
+            </div>
+            <div class="stat">
+              <span class="stat-label">Mana</span>
+              <strong id="player-1-mana">0/0</strong>
+            </div>
+            <div class="stat">
+              <span class="stat-label">Campo</span>
+              <strong id="player-1-board-count">0 em campo</strong>
+            </div>
+            <div class="stat">
+              <span class="stat-label">Suporte</span>
+              <strong id="player-1-support-count">0 suportes</strong>
+            </div>
+          </div>
+        </div>
+
+        <div class="zone-wrapper">
+          <div class="hand-meta">
+            <span>Campo</span>
+            <span>Unidades ativas</span>
+          </div>
+          <div class="zone" id="player-1-board"></div>
+        </div>
+
+        <div class="zone-wrapper">
+          <div class="hand-meta">
+            <span>Suportes</span>
+            <span>Efeitos persistentes</span>
+          </div>
+          <div class="zone support-zone" id="player-1-support"></div>
+        </div>
+
+        <div class="hand-wrapper">
+          <div class="hand-meta">
+            <span>Mao</span>
+            <span id="player-1-hand-count">0 cartas</span>
+          </div>
+          <div class="hand" id="player-1-hand"></div>
+        </div>
+      </article>
+
+      <aside class="library-panel" id="library-panel" aria-hidden="true">
+        <div class="hand-meta">
+          <span>Biblioteca</span>
+          <span>Cartas existentes</span>
+        </div>
+        <div id="card-library"></div>
+      </aside>
+    </section>
+  </main>
+
+  <script src="game.js"></script>
+</body>
+</html>
