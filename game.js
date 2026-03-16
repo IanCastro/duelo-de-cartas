@@ -460,6 +460,78 @@
     return true;
   }
 
+  function cancelPendingAction(state, playerIndex = state.currentPlayerIndex) {
+    let didCancel = false;
+
+    if (state.selectedEffectCard && state.currentPlayerIndex === playerIndex) {
+      const player = state.players[playerIndex];
+      const canceledCard = state.selectedEffectCard;
+      player.hand.push(canceledCard);
+      player.manaAtual = Math.min(player.manaAtual + canceledCard.custo, player.manaMax);
+      state.selectedEffectCard = null;
+      didCancel = true;
+    }
+
+    if (state.selectedAttackerId) {
+      state.selectedAttackerId = null;
+      didCancel = true;
+    }
+
+    return didCancel;
+  }
+
+  function isInteractiveShortcutTarget(target) {
+    if (!target) {
+      return false;
+    }
+
+    if (target.isContentEditable) {
+      return true;
+    }
+
+    const tagName = typeof target.tagName === "string" ? target.tagName.toUpperCase() : "";
+    return ["INPUT", "TEXTAREA", "SELECT", "BUTTON", "A"].includes(tagName);
+  }
+
+  function handleShortcutAction(state, shortcutKey, options = {}) {
+    const normalizedKey = typeof shortcutKey === "string" ? shortcutKey.toLowerCase() : "";
+
+    if (options.repeat || isInteractiveShortcutTarget(options.target)) {
+      return false;
+    }
+
+    if (normalizedKey === "c") {
+      return Boolean(drawTurnCard(state, state.currentPlayerIndex));
+    }
+
+    if (normalizedKey === "a") {
+      if (state.selectedEffectCard) {
+        return resolveEffectTarget(state, state.currentPlayerIndex, "player");
+      }
+
+      if (state.selectedAttackerId) {
+        return attackTarget(state, state.currentPlayerIndex, "player");
+      }
+
+      return false;
+    }
+
+    if (normalizedKey === "e") {
+      if (state.winner) {
+        return false;
+      }
+
+      endTurn(state);
+      return true;
+    }
+
+    if (normalizedKey === "escape") {
+      return cancelPendingAction(state, state.currentPlayerIndex);
+    }
+
+    return false;
+  }
+
   function resolveEndOfTurnSupport(state, player) {
     const healAmount = getSupportBonus(player, "cura_fim_turno");
 
@@ -862,38 +934,45 @@
     });
 
     document.getElementById("draw-button").addEventListener("click", () => {
-      drawTurnCard(gameState, gameState.currentPlayerIndex);
+      handleShortcutAction(gameState, "c");
       render(gameState);
     });
 
     document.getElementById("attack-player-button").addEventListener("click", () => {
-      if (gameState.selectedEffectCard) {
-        resolveEffectTarget(gameState, gameState.currentPlayerIndex, "player");
-      } else {
-        attackTarget(gameState, gameState.currentPlayerIndex, "player");
-      }
+      handleShortcutAction(gameState, "a");
       render(gameState);
     });
 
     document.getElementById("cancel-attack-button").addEventListener("click", () => {
-      if (gameState.selectedEffectCard) {
-        const player = getCurrentPlayer(gameState);
-        const canceledCard = gameState.selectedEffectCard;
-        player.hand.push(canceledCard);
-        player.manaAtual = Math.min(player.manaAtual + canceledCard.custo, player.manaMax);
-        gameState.selectedEffectCard = null;
-      }
-      gameState.selectedAttackerId = null;
+      cancelPendingAction(gameState);
       render(gameState);
     });
 
     document.getElementById("end-turn-button").addEventListener("click", () => {
-      endTurn(gameState);
+      handleShortcutAction(gameState, "e");
       render(gameState);
     });
 
     document.getElementById("restart-button").addEventListener("click", () => {
       gameState = createInitialState();
+      render(gameState);
+    });
+
+    document.addEventListener("keydown", (event) => {
+      if (!["a", "c", "e", "escape"].includes(event.key.toLowerCase())) {
+        return;
+      }
+
+      const didHandle = handleShortcutAction(gameState, event.key, {
+        repeat: event.repeat,
+        target: event.target
+      });
+
+      if (!didHandle) {
+        return;
+      }
+
+      event.preventDefault();
       render(gameState);
     });
   }
@@ -929,6 +1008,8 @@
       getUnitAttackBreakdown,
       getCardDisplayData,
       getCardOverlayData,
+      cancelPendingAction,
+      handleShortcutAction,
       getUnitAttack,
       getAvailableAttackers
     };

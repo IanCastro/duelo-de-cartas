@@ -64,6 +64,90 @@ test("drawing spends mana and fails without enough resource", () => {
   assert(secondDraw === null, "second draw should fail without mana");
 });
 
+test("keyboard shortcut c buys a card when the action is available", () => {
+  const state = game.createInitialState();
+  const handBeforeDraw = state.players[0].hand.length;
+  const deckBeforeDraw = state.deck.length;
+
+  const handled = game.handleShortcutAction(state, "c");
+
+  assert(handled === true, "shortcut should trigger the draw action");
+  assert(state.players[0].hand.length === handBeforeDraw + 1, "shortcut draw should add a card to hand");
+  assert(state.deck.length === deckBeforeDraw - 1, "shortcut draw should consume one deck card");
+  assert(state.players[0].manaAtual === 0, "shortcut draw should still spend mana");
+});
+
+test("keyboard shortcut a attacks the rival player with the selected unit", () => {
+  const state = game.createInitialState();
+  state.players[0].board = [{
+    id: "atk",
+    instanceId: "atk",
+    nome: "Atacante",
+    categoria: "unidade",
+    custo: 1,
+    ataque: 3,
+    vida: 3,
+    vidaBase: 3,
+    descricao: "",
+    estado: "campo",
+    podeAgir: true,
+    jaAtacouNoTurno: false
+  }];
+  game.selectAttacker(state, 0, "atk");
+
+  const handled = game.handleShortcutAction(state, "a");
+
+  assert(handled === true, "shortcut should trigger the attack");
+  assert(state.players[1].vida === 37, "shortcut attack should hit the rival player");
+  assert(state.players[0].board[0].jaAtacouNoTurno === true, "shortcut attack should spend the unit attack");
+});
+
+test("keyboard shortcut e ends the turn", () => {
+  const state = game.createInitialState();
+
+  const handled = game.handleShortcutAction(state, "e");
+
+  assert(handled === true, "shortcut should end the turn");
+  assert(state.currentPlayerIndex === 1, "turn should pass to the next player");
+  assert(state.players[1].manaAtual === 2, "next player should start with refreshed mana");
+});
+
+test("keyboard shortcut escape cancels a prepared effect and refunds mana", () => {
+  const state = game.createInitialState();
+  state.players[0].manaAtual = 3;
+  state.players[0].manaMax = 3;
+  state.players[0].hand = [{
+    id: "effect-1",
+    instanceId: "effect-1",
+    nome: "Raio Arcano",
+    categoria: "efeito",
+    custo: 2,
+    efeito: "dano_direto",
+    valor: 4,
+    descricao: ""
+  }];
+
+  game.playCard(state, 0, "effect-1");
+  const handled = game.handleShortcutAction(state, "Escape");
+
+  assert(handled === true, "escape should cancel the pending effect");
+  assert(state.selectedEffectCard === null, "escape should clear the selected effect");
+  assert(state.players[0].manaAtual === 3, "escape should refund the spent mana");
+  assert(state.players[0].hand.length === 1, "escape should return the card to the hand");
+});
+
+test("keyboard shortcuts ignore interactive targets", () => {
+  const state = game.createInitialState();
+  const handBeforeDraw = state.players[0].hand.length;
+
+  const handled = game.handleShortcutAction(state, "c", {
+    target: { tagName: "button" }
+  });
+
+  assert(handled === false, "shortcut should be ignored while focus is on an interactive element");
+  assert(state.players[0].hand.length === handBeforeDraw, "ignored shortcut should not change the game state");
+});
+
 test("playing a unit spends mana and the unit can attack immediately", () => {
   const state = game.createInitialState();
   state.players[0].manaAtual = 3;
