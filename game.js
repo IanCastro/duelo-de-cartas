@@ -282,6 +282,19 @@
     return rewindToLogEntry(state, entryId);
   }
 
+  function handleLogEntryClick(state, entryId, options = {}) {
+    if (!state) {
+      return state;
+    }
+
+    if (state.selectedLogEntryId === entryId) {
+      return attemptRewindToLogEntry(state, entryId, options);
+    }
+
+    state.selectedLogEntryId = entryId;
+    return state;
+  }
+
   function getCurrentPlayer(state) {
     return state.players[state.currentPlayerIndex];
   }
@@ -1594,7 +1607,13 @@
         <span class="log-entry-text">${entry.texto}</span>
       `;
       item.addEventListener("click", () => {
-        state.selectedLogEntryId = state.selectedLogEntryId === entry.id ? null : entry.id;
+        const nextState = handleLogEntryClick(state, entry.id, {
+          confirmFn: typeof window !== "undefined" ? window.confirm.bind(window) : null
+        });
+        if (nextState !== state) {
+          state = nextState;
+          gameState = nextState;
+        }
         render(state);
       });
       logElement.appendChild(item);
@@ -1756,6 +1775,7 @@
       restoreStateFromSnapshot,
       rewindToLogEntry,
       attemptRewindToLogEntry,
+      handleLogEntryClick,
       getDisplayLogEntries,
       isViewingHistory,
       getRenderedGameState,

@@ -1220,6 +1220,31 @@ test("confirmed rewind restores the selected snapshot", () => {
   assert(rewound.log.length === 1, "confirmed rewind should truncate future history");
 });
 
+test("clicking the selected log entry again rewinds after confirmation", () => {
+  const state = game.createInitialState();
+  const initialHandSize = state.players[0].hand.length;
+  state.players[0].manaAtual = 2;
+  state.players[0].manaMax = 2;
+  game.drawTurnCard(state, 0);
+
+  const selected = game.handleLogEntryClick(state, 1);
+  assert(selected === state, "first click should only select the log entry");
+  assert(state.selectedLogEntryId === 1, "first click should mark the entry as selected");
+
+  let confirmCalls = 0;
+  const rewound = game.handleLogEntryClick(state, 1, {
+    confirmFn: () => {
+      confirmCalls += 1;
+      return true;
+    }
+  });
+
+  assert(confirmCalls === 1, "second click on the same entry should ask for confirmation");
+  assert(rewound !== state, "confirmed second click should restore a new state");
+  assert(rewound.players[0].hand.length === initialHandSize, "confirmed second click should restore the selected snapshot");
+  assert(rewound.log.length === 1, "confirmed second click should discard future history");
+});
+
 test("log display helper shows the newest entry first without renumbering", () => {
   const displayed = game.getDisplayLogEntries([
     { id: 1, numero: 1, texto: "Primeira" },
