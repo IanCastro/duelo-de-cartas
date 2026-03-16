@@ -165,6 +165,19 @@
     return state;
   }
 
+  function createRestartState(previousState) {
+    const nextState = createInitialState();
+
+    if (!previousState) {
+      return nextState;
+    }
+
+    nextState.isLibraryOpen = Boolean(previousState.isLibraryOpen);
+    nextState.isRulesOpen = Boolean(previousState.isRulesOpen);
+    nextState.isLogOpen = Boolean(previousState.isLogOpen);
+    return nextState;
+  }
+
   function cloneData(data) {
     return JSON.parse(JSON.stringify(data));
   }
@@ -1631,12 +1644,12 @@
     });
 
     document.getElementById("restart-button").addEventListener("click", () => {
-      gameState = createInitialState();
+      gameState = createRestartState(gameState);
       render(gameState);
     });
 
     document.getElementById("winner-restart-button").addEventListener("click", () => {
-      gameState = createInitialState();
+      gameState = createRestartState(gameState);
       render(gameState);
     });
 
@@ -1699,6 +1712,7 @@
       createDeck,
       shuffleDeck,
       createInitialState,
+      createRestartState,
       drawCard,
       drawTurnCard,
       playCard,

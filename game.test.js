@@ -34,6 +34,24 @@ test("initial state sets health, hands, and starting mana", () => {
   assert(state.log[0].texto.includes("Partida iniciada"), "first log line should describe the start of the match");
 });
 
+test("new game keeps the currently open side menu", () => {
+  const previousState = game.createInitialState();
+  previousState.isRulesOpen = true;
+  previousState.isLibraryOpen = false;
+  previousState.isLogOpen = false;
+  previousState.selectedLogEntryId = 1;
+  previousState.isWinnerModalOpen = true;
+
+  const restartedState = game.createRestartState(previousState);
+
+  assert(restartedState.isRulesOpen === true, "restart should preserve the open rules menu");
+  assert(restartedState.isLibraryOpen === false, "restart should keep unrelated menus closed");
+  assert(restartedState.isLogOpen === false, "restart should keep unrelated menus closed");
+  assert(restartedState.selectedLogEntryId === null, "restart should clear any selected history line");
+  assert(restartedState.isWinnerModalOpen === false, "restart should close the winner modal in the new game");
+  assert(restartedState.log.length === 1, "restart should still begin with a fresh initial log entry");
+});
+
 test("mana grows by turn up to the cap and refills", () => {
   const state = game.createInitialState();
 
