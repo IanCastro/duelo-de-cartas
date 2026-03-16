@@ -1,7 +1,7 @@
 (function () {
   const MAX_HEALTH = 40;
   const STARTING_HAND_SIZE = 4;
-  const MAX_MANA = 6;
+  const MAX_MANA = 8;
   const DRAW_COST = 1;
   const CARD_COPIES_PER_TYPE = 4;
 
@@ -11,7 +11,7 @@
       nome: "Escudeiro Solar",
       categoria: "unidade",
       imagem: "assets/cards/unit-1.png",
-      custo: 1,
+      custo: 2,
       ataque: 2,
       vida: 5,
       vidaBase: 5,
@@ -22,7 +22,7 @@
       nome: "Arqueira Nebulosa",
       categoria: "unidade",
       imagem: "assets/cards/unit-2.png",
-      custo: 2,
+      custo: 3,
       ataque: 3,
       vida: 3,
       vidaBase: 3,
@@ -33,8 +33,8 @@
       nome: "Guardiao de Ferro",
       categoria: "unidade",
       imagem: "assets/cards/unit-3.png",
-      custo: 3,
-      ataque: 1,
+      custo: 4,
+      ataque: 2,
       vida: 8,
       vidaBase: 8,
       descricao: "Resistente e ideal para travar o campo."
@@ -44,7 +44,7 @@
       nome: "Berserker Rubro",
       categoria: "unidade",
       imagem: "assets/cards/unit-4.png",
-      custo: 4,
+      custo: 5,
       ataque: 4,
       vida: 4,
       vidaBase: 4,
@@ -55,7 +55,7 @@
       nome: "Estandarte de Guerra",
       categoria: "suporte",
       imagem: "assets/cards/support-1.png",
-      custo: 4,
+      custo: 5,
       efeito: "aura_ataque",
       valor: 1,
       descricao: "Suas unidades ganham +1 de ataque enquanto este suporte estiver em campo."
@@ -142,9 +142,13 @@
       isLogOpen: false,
       selectedAttackerId: null,
       selectedEffectCard: null,
+      selectedLogEntryId: null,
+      isHistoryPreviewOpen: false,
+      isWinnerModalOpen: false,
       winner: null,
       turnNumber: 1,
       log: [],
+      nextLogNumber: 1,
       players: [
         createPlayer(1, "Sentinela Azul"),
         createPlayer(2, "Guardiao Rubro")
@@ -158,11 +162,96 @@
     }
 
     startTurn(state, 0, false);
+    addLog(state, buildInitialLogMessage(state));
     return state;
   }
 
+  function cloneData(data) {
+    return JSON.parse(JSON.stringify(data));
+  }
+
+  function buildInitialLogMessage(state) {
+    const playerHands = state.players
+      .map((player) => `${player.nome}: ${player.hand.map((card) => card.nome).join(", ")}`)
+      .join(" | ");
+
+    return `Partida iniciada. ${playerHands}.`;
+  }
+
+  function createStateSnapshot(state) {
+    return {
+      deck: cloneData(state.deck),
+      discardPile: cloneData(state.discardPile),
+      currentPlayerIndex: state.currentPlayerIndex,
+      isLibraryOpen: state.isLibraryOpen,
+      isRulesOpen: state.isRulesOpen,
+      isLogOpen: state.isLogOpen,
+      selectedAttackerId: state.selectedAttackerId,
+      selectedEffectCard: cloneData(state.selectedEffectCard),
+      winnerPlayerId: state.winner ? state.winner.id : null,
+      turnNumber: state.turnNumber,
+      players: cloneData(state.players)
+    };
+  }
+
+  function cloneLogEntries(entries) {
+    return entries.map((entry) => ({
+      id: entry.id,
+      numero: entry.numero,
+      texto: entry.texto,
+      snapshot: cloneData(entry.snapshot)
+    }));
+  }
+
   function addLog(state, message) {
-    state.log.unshift(message);
+    const entryNumber = state.nextLogNumber || (state.log.length + 1);
+
+    state.log.push({
+      id: entryNumber,
+      numero: entryNumber,
+      texto: message,
+      snapshot: createStateSnapshot(state)
+    });
+
+    state.nextLogNumber = entryNumber + 1;
+  }
+
+  function restoreStateFromSnapshot(snapshot, logEntries) {
+    const restoredState = {
+      deck: cloneData(snapshot.deck),
+      discardPile: cloneData(snapshot.discardPile),
+      currentPlayerIndex: snapshot.currentPlayerIndex,
+      isLibraryOpen: snapshot.isLibraryOpen,
+      isRulesOpen: snapshot.isRulesOpen,
+      isLogOpen: snapshot.isLogOpen,
+      selectedAttackerId: snapshot.selectedAttackerId,
+      selectedEffectCard: cloneData(snapshot.selectedEffectCard),
+      selectedLogEntryId: null,
+      isHistoryPreviewOpen: false,
+      isWinnerModalOpen: Boolean(snapshot.winnerPlayerId),
+      winner: null,
+      turnNumber: snapshot.turnNumber,
+      log: cloneLogEntries(logEntries),
+      nextLogNumber: logEntries.length + 1,
+      players: cloneData(snapshot.players)
+    };
+
+    restoredState.winner = snapshot.winnerPlayerId
+      ? restoredState.players.find((player) => player.id === snapshot.winnerPlayerId) || null
+      : null;
+
+    return restoredState;
+  }
+
+  function rewindToLogEntry(state, entryId) {
+    const targetIndex = state.log.findIndex((entry) => entry.id === entryId);
+
+    if (targetIndex === -1) {
+      return state;
+    }
+
+    const keptEntries = state.log.slice(0, targetIndex + 1);
+    return restoreStateFromSnapshot(keptEntries[targetIndex].snapshot, keptEntries);
   }
 
   function getCurrentPlayer(state) {
@@ -185,6 +274,41 @@
 
   function getUnitAttackBonus(player) {
     return getSupportBonus(player, "aura_ataque");
+  }
+
+  function canPlayerReceiveHealing(player) {
+    return Boolean(player && player.vida < MAX_HEALTH);
+  }
+
+  function getHealableUnits(player) {
+    if (!player || !Array.isArray(player.board)) {
+      return [];
+    }
+
+    return player.board.filter((unit) => unit.vida < unit.vidaBase);
+  }
+
+  function hasValidHealingTargets(state, playerIndex) {
+    const player = state.players[playerIndex];
+    return canPlayerReceiveHealing(player) || getHealableUnits(player).length > 0;
+  }
+
+  function canPlayCard(state, playerIndex, card) {
+    if (state.winner || state.currentPlayerIndex !== playerIndex || state.selectedEffectCard) {
+      return false;
+    }
+
+    const player = state.players[playerIndex];
+
+    if (!canAfford(player, card.custo)) {
+      return false;
+    }
+
+    if (card.efeito === "cura_direta") {
+      return hasValidHealingTargets(state, playerIndex);
+    }
+
+    return true;
   }
 
   function getUnitAttackBreakdown(unit, player) {
@@ -285,7 +409,6 @@
   function resolveDamageEffectOnPlayer(state, card, player, opponent) {
     opponent.vida = Math.max(opponent.vida - card.valor, 0);
     addLog(state, `${player.nome} usou ${card.nome} e causou ${card.valor} de dano em ${opponent.nome}.`);
-    checkWinner(state);
   }
 
   function resolveDamageEffectOnUnit(state, card, player, opponent, targetInstanceId) {
@@ -297,27 +420,38 @@
 
     const target = opponent.board[targetIndex];
     target.vida = Math.max(target.vida - card.valor, 0);
-    addLog(state, `${player.nome} usou ${card.nome} e causou ${card.valor} de dano em ${target.nome}.`);
 
     if (target.vida <= 0) {
       const [defeatedUnit] = opponent.board.splice(targetIndex, 1);
       moveCardToDiscard(state, defeatedUnit);
+      addLog(state, `${player.nome} usou ${card.nome} e causou ${card.valor} de dano em ${target.nome}.`);
       addLog(state, `${defeatedUnit.nome} foi derrotada e enviada ao descarte.`);
+      return true;
     }
 
+    addLog(state, `${player.nome} usou ${card.nome} e causou ${card.valor} de dano em ${target.nome}.`);
     return true;
   }
 
   function resolveHealingEffectOnPlayer(state, card, player) {
+    if (!canPlayerReceiveHealing(player)) {
+      return false;
+    }
+
     const recovered = Math.min(card.valor, MAX_HEALTH - player.vida);
     player.vida = Math.min(player.vida + card.valor, MAX_HEALTH);
     addLog(state, `${player.nome} usou ${card.nome} e recuperou ${recovered} de vida.`);
+    return true;
   }
 
   function resolveHealingEffectOnUnit(state, card, player, targetInstanceId) {
     const target = player.board.find((unit) => unit.instanceId === targetInstanceId);
 
     if (!target) {
+      return false;
+    }
+
+    if (target.vida >= target.vidaBase) {
       return false;
     }
 
@@ -351,8 +485,7 @@
 
     if (card.efeito === "cura_direta") {
       if (targetType === "player") {
-        resolveHealingEffectOnPlayer(state, card, player);
-        resolved = true;
+        resolved = resolveHealingEffectOnPlayer(state, card, player);
       }
 
       if (targetType === "ally-unit") {
@@ -366,6 +499,7 @@
 
     moveCardToDiscard(state, card);
     state.selectedEffectCard = null;
+    checkWinner(state);
     return true;
   }
 
@@ -383,7 +517,7 @@
 
     const card = player.hand[cardIndex];
 
-    if (!spendMana(player, card.custo)) {
+    if (!canPlayCard(state, playerIndex, card) || !spendMana(player, card.custo)) {
       return false;
     }
 
@@ -498,14 +632,16 @@
 
     const target = opponent.board[targetIndex];
     target.vida = Math.max(target.vida - attackValue, 0);
-    addLog(state, `${attacker.nome} atacou ${target.nome} e causou ${attackValue} de dano.`);
 
     if (target.vida <= 0) {
       const [defeatedUnit] = opponent.board.splice(targetIndex, 1);
       moveCardToDiscard(state, defeatedUnit);
+      addLog(state, `${attacker.nome} atacou ${target.nome} e causou ${attackValue} de dano.`);
       addLog(state, `${defeatedUnit.nome} foi derrotada e enviada ao descarte.`);
+      return true;
     }
 
+    addLog(state, `${attacker.nome} atacou ${target.nome} e causou ${attackValue} de dano.`);
     return true;
   }
 
@@ -564,7 +700,7 @@
 
     const player = state.players[playerIndex];
     const canDraw = state.deck.length > 0 && canAfford(player, DRAW_COST);
-    const playableCards = player.hand.filter((card) => canAfford(player, card.custo)).length;
+    const playableCards = player.hand.filter((card) => canPlayCard(state, playerIndex, card)).length;
     const readyAttackers = getAvailableAttackers(player).length;
     const pendingSelection = Boolean(state.selectedAttackerId || state.selectedEffectCard);
     const hasAny = canDraw || playableCards > 0 || readyAttackers > 0 || pendingSelection;
@@ -698,6 +834,10 @@
   }
 
   function checkWinner(state) {
+    if (state.winner) {
+      return state.winner;
+    }
+
     const defeated = state.players.find((player) => player.vida <= 0);
 
     if (!defeated) {
@@ -708,6 +848,7 @@
 
     if (state.winner) {
       addLog(state, `${state.winner.nome} venceu a partida.`);
+      state.isWinnerModalOpen = true;
     }
 
     return state.winner;
@@ -816,6 +957,25 @@
     return Boolean(state.isLibraryOpen || state.isRulesOpen || state.isLogOpen);
   }
 
+  function toggleExclusiveSidePanel(state, panelName) {
+    const panelMap = {
+      library: "isLibraryOpen",
+      rules: "isRulesOpen",
+      log: "isLogOpen"
+    };
+    const targetFlag = panelMap[panelName];
+
+    if (!targetFlag) {
+      return;
+    }
+
+    const nextValue = !state[targetFlag];
+    state.isLibraryOpen = false;
+    state.isRulesOpen = false;
+    state.isLogOpen = false;
+    state[targetFlag] = nextValue;
+  }
+
   function getPlayerHeaderTargetMode(state, targetPlayerIndex) {
     if (state.winner) {
       return null;
@@ -826,7 +986,11 @@
         return "attack";
       }
 
-      if (state.selectedEffectCard.efeito === "cura_direta" && targetPlayerIndex === state.currentPlayerIndex) {
+      if (
+        state.selectedEffectCard.efeito === "cura_direta"
+        && targetPlayerIndex === state.currentPlayerIndex
+        && canPlayerReceiveHealing(state.players[targetPlayerIndex])
+      ) {
         return "heal";
       }
 
@@ -979,17 +1143,142 @@
     });
   }
 
+  function formatPlayerHealth(player) {
+    return `${player.vida}/${MAX_HEALTH}`;
+  }
+
+  function getTargetHintText(targetMode) {
+    if (targetMode === "attack") {
+      return "Clique para atacar jogador";
+    }
+
+    if (targetMode === "heal") {
+      return "Clique para curar jogador";
+    }
+
+    return "";
+  }
+
+  function createHistoryPreviewItem(card) {
+    const item = document.createElement("div");
+    item.className = "history-preview-item";
+
+    let meta = "";
+    if (card.categoria === "unidade") {
+      meta = `ATQ ${card.ataque} · VIDA ${card.vida}/${card.vidaBase}`;
+    } else if (typeof card.valor === "number") {
+      meta = `VALOR ${card.valor}`;
+    } else {
+      meta = card.categoria.toUpperCase();
+    }
+
+    item.innerHTML = `
+      <span class="history-preview-item-title">${card.nome}</span>
+      <span class="history-preview-item-meta">${meta}</span>
+    `;
+
+    return item;
+  }
+
+  function renderHistoryPreview(state) {
+    const historyModal = document.getElementById("history-modal");
+    const historyTitle = document.getElementById("history-modal-title");
+    const historyText = document.getElementById("history-modal-text");
+    const historyTurn = document.getElementById("history-modal-turn");
+    const historyDeck = document.getElementById("history-modal-deck");
+    const historyDiscard = document.getElementById("history-modal-discard");
+    const historyGrid = document.getElementById("history-preview-grid");
+
+    if (!historyModal || !historyTitle || !historyText || !historyTurn || !historyDeck || !historyDiscard || !historyGrid) {
+      return;
+    }
+
+    historyModal.setAttribute("aria-hidden", String(!state.isHistoryPreviewOpen));
+    historyGrid.innerHTML = "";
+
+    if (!state.isHistoryPreviewOpen) {
+      return;
+    }
+
+    const selectedEntry = state.log.find((entry) => entry.id === state.selectedLogEntryId);
+
+    if (!selectedEntry) {
+      return;
+    }
+
+    const snapshot = selectedEntry.snapshot;
+
+    historyTitle.textContent = `Acao ${selectedEntry.numero}`;
+    historyText.textContent = selectedEntry.texto;
+    historyTurn.textContent = snapshot.players[snapshot.currentPlayerIndex].nome;
+    historyDeck.textContent = `${snapshot.deck.length}/${getTotalDeckSize()}`;
+    historyDiscard.textContent = String(snapshot.discardPile.length);
+
+    snapshot.players.forEach((player) => {
+      const panel = document.createElement("section");
+      panel.className = "history-preview-panel";
+
+      const header = document.createElement("div");
+      header.className = "history-preview-header";
+      header.innerHTML = `
+        <h3>${player.nome}</h3>
+        <div class="history-preview-stats">
+          <span class="history-preview-chip">Vida ${formatPlayerHealth(player)}</span>
+          <span class="history-preview-chip">Mana ${player.manaAtual}/${player.manaMax}</span>
+        </div>
+      `;
+      panel.appendChild(header);
+
+      [
+        { titulo: "Campo", cards: player.board },
+        { titulo: "Suportes", cards: player.supportZone },
+        { titulo: "Mao", cards: player.hand }
+      ].forEach((sectionData) => {
+        const section = document.createElement("div");
+        section.className = "history-preview-section";
+
+        const title = document.createElement("span");
+        title.className = "history-preview-section-title";
+        title.textContent = sectionData.titulo;
+        section.appendChild(title);
+
+        const list = document.createElement("div");
+        list.className = "history-preview-list";
+
+        if (!sectionData.cards.length) {
+          const empty = document.createElement("div");
+          empty.className = "history-preview-item";
+          empty.innerHTML = `
+            <span class="history-preview-item-title">Vazio</span>
+            <span class="history-preview-item-meta">Sem cartas nesta area</span>
+          `;
+          list.appendChild(empty);
+        } else {
+          sectionData.cards.forEach((card) => {
+            list.appendChild(createHistoryPreviewItem(card));
+          });
+        }
+
+        section.appendChild(list);
+        panel.appendChild(section);
+      });
+
+      historyGrid.appendChild(panel);
+    });
+  }
+
   function render(state) {
     const currentPlayer = getCurrentPlayer(state);
 
     state.players.forEach((player, index) => {
       const groupedHand = groupHandByCategory(player.hand);
-      document.getElementById(`player-${player.id}-health`).textContent = String(player.vida);
+      document.getElementById(`player-${player.id}-health`).textContent = formatPlayerHealth(player);
       document.getElementById(`player-${player.id}-hand-count`).textContent = `${player.hand.length} cartas`;
       document.getElementById(`player-${player.id}-board-count`).textContent = `${player.board.length} em campo`;
       document.getElementById(`player-${player.id}-support-count`).textContent = `${player.supportZone.length} suportes`;
       document.getElementById(`player-${player.id}-mana`).textContent = `${player.manaAtual}/${player.manaMax}`;
       const playerNameButton = document.getElementById(`player-${player.id}-name`);
+      const playerTargetHint = document.getElementById(`player-${player.id}-target-hint`);
       const headerTargetMode = getPlayerHeaderTargetMode(state, index);
 
       if (playerNameButton) {
@@ -1000,6 +1289,13 @@
         playerNameButton.classList.toggle("targetable-name-heal", headerTargetMode === "heal");
       }
 
+      if (playerTargetHint) {
+        const hintText = getTargetHintText(headerTargetMode);
+        playerTargetHint.hidden = !hintText;
+        playerTargetHint.textContent = hintText;
+        playerTargetHint.classList.toggle("target-hint-heal", headerTargetMode === "heal");
+      }
+
       ["unidade", "suporte", "efeito"].forEach((category) => {
         document.getElementById(`player-${player.id}-hand-${category}-count`).textContent = String(groupedHand[category].length);
 
@@ -1007,7 +1303,7 @@
           `player-${player.id}-hand-${category}`,
           groupedHand[category],
           (card) => createCardElement(card, {
-            interactive: index === state.currentPlayerIndex && !state.winner && canAfford(player, card.custo) && !state.selectedEffectCard,
+            interactive: canPlayCard(state, index, card),
             className: player.id === 2 ? "opponent-card" : "",
             player,
             onClick: () => {
@@ -1032,7 +1328,11 @@
           const canSelect = isCurrentPlayer && !state.winner && card.podeAgir && !card.jaAtacouNoTurno && !state.selectedEffectCard;
           const canBeCombatTargeted = !isCurrentPlayer && Boolean(state.selectedAttackerId) && !state.winner;
           const canBeDamageEffectTargeted = !isCurrentPlayer && Boolean(state.selectedEffectCard) && state.selectedEffectCard.efeito === "dano_direto" && !state.winner;
-          const canBeHealingEffectTargeted = isCurrentPlayer && Boolean(state.selectedEffectCard) && state.selectedEffectCard.efeito === "cura_direta" && !state.winner;
+          const canBeHealingEffectTargeted = isCurrentPlayer
+            && Boolean(state.selectedEffectCard)
+            && state.selectedEffectCard.efeito === "cura_direta"
+            && !state.winner
+            && card.vida < card.vidaBase;
 
           return createCardElement(card, {
             interactive: canSelect || canBeCombatTargeted || canBeDamageEffectTargeted || canBeHealingEffectTargeted,
@@ -1089,16 +1389,15 @@
       ? "A partida terminou. Inicie uma nova partida para jogar novamente."
       : state.selectedEffectCard
         ? state.selectedEffectCard.efeito === "cura_direta"
-          ? "Escolha uma unidade aliada ou clique no seu nome para curar. Clique novamente na carta armada para cancelar."
-          : "Escolha uma unidade inimiga ou clique no nome do rival para causar dano. Clique novamente na carta armada para cancelar."
+          ? "Escolha uma unidade aliada ferida ou clique no seu nome para curar o jogador. Clique novamente na carta armada para cancelar."
+          : "Escolha uma unidade inimiga ou clique no nome do rival para atacar diretamente o jogador. Clique novamente na carta armada para cancelar."
         : state.selectedAttackerId
           ? getOpponentPlayer(state).board.length === 0 && getOpponentPlayer(state).supportZone.length > 0
-            ? "Escolha unidade, suporte exposto ou clique no nome do rival para atacar. Clique novamente na unidade para cancelar."
-            : "Escolha uma unidade inimiga ou clique no nome do rival para atacar. Clique novamente na unidade para cancelar."
+            ? "Escolha unidade, suporte exposto ou clique no nome do rival para atacar o jogador. Clique novamente na unidade para cancelar."
+            : "Escolha uma unidade inimiga ou clique no nome do rival para atacar o jogador. Clique novamente na unidade para cancelar."
           : "Use sua mana, baixe cartas e ataque com unidades prontas.";
     document.getElementById("deck-count").textContent = `${state.deck.length}/${getTotalDeckSize()}`;
     document.getElementById("discard-count").textContent = String(state.discardPile.length);
-    document.getElementById("mana-display").textContent = `${currentPlayer.manaAtual}/${currentPlayer.manaMax}`;
     document.getElementById("attacks-left").textContent = String(getAvailableAttackers(currentPlayer).length);
     document.getElementById("winner-banner").textContent = state.winner ? `${state.winner.nome} venceu` : "Sem vencedor";
 
@@ -1181,30 +1480,53 @@
     const logElement = document.getElementById("game-log");
     logElement.innerHTML = "";
     state.log.forEach((entry) => {
-      const item = document.createElement("li");
-      item.textContent = entry;
+      const item = document.createElement("button");
+      item.type = "button";
+      item.className = `log-entry${state.selectedLogEntryId === entry.id && state.isHistoryPreviewOpen ? " is-selected" : ""}`;
+      item.innerHTML = `
+        <span class="log-entry-number">${entry.numero}</span>
+        <span class="log-entry-text">${entry.texto}</span>
+      `;
+      item.addEventListener("click", () => {
+        state.selectedLogEntryId = entry.id;
+        state.isHistoryPreviewOpen = true;
+        render(state);
+      });
       logElement.appendChild(item);
     });
 
     renderLibrary(state);
+    renderHistoryPreview(state);
 
     document.getElementById("player-bottom-panel").classList.toggle("active", state.currentPlayerIndex === 0 && !state.winner);
     document.getElementById("player-top-panel").classList.toggle("active", state.currentPlayerIndex === 1 && !state.winner);
+
+    const winnerModal = document.getElementById("winner-modal");
+    const winnerModalTitle = document.getElementById("winner-modal-title");
+    const winnerModalText = document.getElementById("winner-modal-text");
+
+    if (winnerModal && winnerModalTitle && winnerModalText) {
+      winnerModal.setAttribute("aria-hidden", String(!state.isWinnerModalOpen));
+      if (state.winner) {
+        winnerModalTitle.textContent = `${state.winner.nome} venceu`;
+        winnerModalText.textContent = `${state.winner.nome} reduziu a vida rival a zero e venceu a partida.`;
+      }
+    }
   }
 
   function bindUI() {
     document.getElementById("toggle-library-button").addEventListener("click", () => {
-      gameState.isLibraryOpen = !gameState.isLibraryOpen;
+      toggleExclusiveSidePanel(gameState, "library");
       render(gameState);
     });
 
     document.getElementById("toggle-rules-button").addEventListener("click", () => {
-      gameState.isRulesOpen = !gameState.isRulesOpen;
+      toggleExclusiveSidePanel(gameState, "rules");
       render(gameState);
     });
 
     document.getElementById("toggle-log-button").addEventListener("click", () => {
-      gameState.isLogOpen = !gameState.isLogOpen;
+      toggleExclusiveSidePanel(gameState, "log");
       render(gameState);
     });
 
@@ -1230,6 +1552,37 @@
 
     document.getElementById("restart-button").addEventListener("click", () => {
       gameState = createInitialState();
+      render(gameState);
+    });
+
+    document.getElementById("winner-restart-button").addEventListener("click", () => {
+      gameState = createInitialState();
+      render(gameState);
+    });
+
+    document.getElementById("close-winner-modal-button").addEventListener("click", () => {
+      gameState.isWinnerModalOpen = false;
+      render(gameState);
+    });
+
+    document.getElementById("close-history-modal-button").addEventListener("click", () => {
+      gameState.isHistoryPreviewOpen = false;
+      gameState.selectedLogEntryId = null;
+      render(gameState);
+    });
+
+    document.getElementById("resume-history-button").addEventListener("click", () => {
+      gameState.isHistoryPreviewOpen = false;
+      gameState.selectedLogEntryId = null;
+      render(gameState);
+    });
+
+    document.getElementById("rewind-history-button").addEventListener("click", () => {
+      if (gameState.selectedLogEntryId == null) {
+        return;
+      }
+
+      gameState = rewindToLogEntry(gameState, gameState.selectedLogEntryId);
       render(gameState);
     });
 
@@ -1285,9 +1638,17 @@
       getUnitAttackBreakdown,
       getCardDisplayData,
       getCardOverlayData,
+      canPlayerReceiveHealing,
+      getHealableUnits,
+      hasValidHealingTargets,
+      canPlayCard,
       getDeckCardCounts,
       getPlayerHeaderTargetMode,
       resolvePlayerHeaderTarget,
+      toggleExclusiveSidePanel,
+      createStateSnapshot,
+      restoreStateFromSnapshot,
+      rewindToLogEntry,
       groupHandByCategory,
       getTotalDeckSize,
       isAnySidePanelOpen,

@@ -29,7 +29,9 @@ test("initial state sets health, hands, and starting mana", () => {
   assert(state.players[0].manaAtual === 1 && state.players[0].manaMax === 1, "first player should start with 1 mana");
   assert(state.players[1].manaAtual === 0 && state.players[1].manaMax === 0, "second player should wait for its turn to gain mana");
   assert(Array.isArray(state.log), "game should keep a log array");
-  assert(state.log.length === 0, "log should start empty until real game actions happen");
+  assert(state.log.length === 1, "log should start with the initial setup entry");
+  assert(state.log[0].numero === 1, "first log line should start at action 1");
+  assert(state.log[0].texto.includes("Partida iniciada"), "first log line should describe the start of the match");
 });
 
 test("mana grows by turn up to the cap and refills", () => {
@@ -135,6 +137,7 @@ test("player header target mode exposes attack and heal player targets", () => {
   assert(game.getPlayerHeaderTargetMode(attackState, 1) === "attack", "enemy header should become an attack target");
 
   const healState = game.createInitialState();
+  healState.players[0].vida = 30;
   healState.selectedEffectCard = {
     efeito: "cura_direta"
   };
@@ -283,7 +286,7 @@ test("player can play a card and still attack with a ready unit in the same turn
     instanceId: "s",
     nome: "Estandarte",
     categoria: "suporte",
-    custo: 4,
+    custo: 5,
     efeito: "aura_ataque",
     valor: 1,
     descricao: ""
@@ -312,7 +315,7 @@ test("player can play a card and still attack with a ready unit in the same turn
   assert(attacked === true, "unit should still attack in the same turn");
   assert(state.players[1].vida === 37, "support aura should buff the attack");
   assert(game.getUnitAttackBreakdown(state.players[0].board[0], state.players[0]).bonus === 1, "attack breakdown should expose support bonus");
-  assert(state.players[0].manaAtual === 2, "support should use the new cost");
+  assert(state.players[0].manaAtual === 1, "support should use the new cost");
 });
 
 test("each unit can attack only once per turn", () => {
@@ -438,6 +441,21 @@ test("side rail helper reports when any optional panel is open", () => {
   }) === true, "helper should be true when any side panel is open");
 });
 
+test("exclusive side panel helper keeps only one menu open at a time", () => {
+  const state = game.createInitialState();
+
+  game.toggleExclusiveSidePanel(state, "library");
+  assert(state.isLibraryOpen === true, "library should open");
+  assert(state.isRulesOpen === false && state.isLogOpen === false, "other panels should stay closed");
+
+  game.toggleExclusiveSidePanel(state, "log");
+  assert(state.isLogOpen === true, "log should become the only open panel");
+  assert(state.isLibraryOpen === false && state.isRulesOpen === false, "opening another panel should close the previous one");
+
+  game.toggleExclusiveSidePanel(state, "log");
+  assert(state.isLogOpen === false, "clicking the active panel again should close it");
+});
+
 test("unit health package matches the new rebalance", () => {
   const escudeiro = game.CARD_LIBRARY.find((card) => card.id === "unit-1");
   const arqueira = game.CARD_LIBRARY.find((card) => card.id === "unit-2");
@@ -448,6 +466,15 @@ test("unit health package matches the new rebalance", () => {
   assert(arqueira.vidaBase === 3, "Arqueira Nebulosa should have 3 base life");
   assert(guardiao.vidaBase === 8, "Guardiao de Ferro should have 8 base life");
   assert(berserker.vidaBase === 4, "Berserker Rubro should have 4 base life");
+  assert(guardiao.ataque === 2, "Guardiao de Ferro should now have 2 attack");
+  assert(escudeiro.custo === 2, "Escudeiro Solar should cost 2");
+  assert(arqueira.custo === 3, "Arqueira Nebulosa should cost 3");
+  assert(guardiao.custo === 4, "Guardiao de Ferro should cost 4");
+  assert(berserker.custo === 5, "Berserker Rubro should cost 5");
+});
+
+test("max mana is now 8", () => {
+  assert(game.MAX_MANA === 8, "max mana should be raised to 8");
 });
 
 test("attack breakdown separates base and bonus", () => {
@@ -792,6 +819,7 @@ test("direct damage cannot target supports", () => {
 
 test("canceling prepared direct damage refunds mana and returns the card to hand", () => {
   const state = game.createInitialState();
+  const logLengthBefore = state.log.length;
   state.players[0].manaAtual = 2;
   state.players[0].manaMax = 2;
   state.players[0].hand = [{
@@ -813,7 +841,7 @@ test("canceling prepared direct damage refunds mana and returns the card to hand
   assert(player.manaAtual === 2, "cancel should refund the spent mana");
   assert(player.hand.length === 1, "cancel should return the direct damage card to hand");
   assert(state.selectedEffectCard === null, "cancel should clear selected effect");
-  assert(state.log.length === 0, "canceling a prepared effect should not add log noise");
+  assert(state.log.length === logLengthBefore, "canceling a prepared effect should not add log noise");
 });
 
 test("layout markup removes the cancel button and keeps a pending effect slot", () => {
@@ -822,13 +850,16 @@ test("layout markup removes the cancel button and keeps a pending effect slot", 
   assert(!html.includes("cancel-attack-button"), "cancel button should be removed from the markup");
   assert(html.includes("player-1-pending-slot"), "active player area should expose a pending effect slot");
   assert(html.includes("player-2-pending-slot"), "inactive player area should expose a pending effect slot");
+  assert(!html.includes("id=\"mana-display\""), "top bar should no longer render redundant mana");
+  assert(html.includes("id=\"winner-modal\""), "winner modal markup should exist");
+  assert(html.includes("id=\"history-modal\""), "history modal markup should exist");
 });
 
-test("estandarte de guerra now costs 4 mana", () => {
+test("estandarte de guerra now costs 5 mana", () => {
   const banner = game.CARD_LIBRARY.find((card) => card.nome === "Estandarte de Guerra");
 
   assert(Boolean(banner), "banner card should exist");
-  assert(banner.custo === 4, "banner should use the new cost");
+  assert(banner.custo === 5, "banner should use the new cost");
 });
 
 test("every card exposes an image path that exists on disk", () => {
@@ -839,16 +870,17 @@ test("every card exposes an image path that exists on disk", () => {
   });
 });
 
-test("support with new cost cannot be played below 4 mana", () => {
+test("support with new cost cannot be played below 5 mana", () => {
   const state = game.createInitialState();
-  state.players[0].manaAtual = 3;
-  state.players[0].manaMax = 3;
+  const logLengthBefore = state.log.length;
+  state.players[0].manaAtual = 4;
+  state.players[0].manaMax = 4;
   state.players[0].hand = [{
     id: "s",
     instanceId: "s",
     nome: "Estandarte de Guerra",
     categoria: "suporte",
-    custo: 4,
+    custo: 5,
     efeito: "aura_ataque",
     valor: 1,
     descricao: ""
@@ -856,13 +888,14 @@ test("support with new cost cannot be played below 4 mana", () => {
 
   const played = game.playCard(state, 0, "s");
 
-  assert(played === false, "banner should fail without 4 mana");
+  assert(played === false, "banner should fail without 5 mana");
   assert(state.players[0].supportZone.length === 0, "banner should not enter play");
-  assert(state.log.length === 0, "failed play should not create a log entry");
+  assert(state.log.length === logLengthBefore, "failed play should not create a log entry");
 });
 
 test("preparing direct damage does not log until it resolves", () => {
   const state = game.createInitialState();
+  const logLengthBefore = state.log.length;
   state.players[0].manaAtual = 2;
   state.players[0].manaMax = 2;
   state.players[0].hand = [{
@@ -879,7 +912,7 @@ test("preparing direct damage does not log until it resolves", () => {
   const played = game.playCard(state, 0, "e");
 
   assert(played === true, "direct damage should still enter target mode");
-  assert(state.log.length === 0, "preparing the effect should not log by itself");
+  assert(state.log.length === logLengthBefore, "preparing the effect should not log by itself");
 });
 
 test("repair can heal the player and respects the new max health", () => {
@@ -942,6 +975,42 @@ test("repair can heal an allied unit without exceeding its base life", () => {
   assert(resolved === true, "healing should resolve on an allied unit");
   assert(state.players[0].board[0].vida === 5, "healing should stop at the unit base life");
   assert(state.discardPile.length === 1, "healing card should go to discard after healing an ally");
+});
+
+test("repair cannot be played if every healing target is full", () => {
+  const state = game.createInitialState();
+  state.players[0].manaAtual = 3;
+  state.players[0].manaMax = 3;
+  state.players[0].vida = 40;
+  state.players[0].board = [{
+    id: "ally",
+    instanceId: "ally",
+    nome: "Aliada Inteira",
+    categoria: "unidade",
+    custo: 2,
+    ataque: 2,
+    vida: 5,
+    vidaBase: 5,
+    descricao: "",
+    estado: "campo",
+    podeAgir: true,
+    jaAtacouNoTurno: false
+  }];
+  const healCard = {
+    id: "heal",
+    instanceId: "heal",
+    nome: "Reparo",
+    categoria: "efeito",
+    custo: 1,
+    efeito: "cura_direta",
+    valor: 6,
+    descricao: ""
+  };
+  state.players[0].hand = [healCard];
+
+  assert(game.hasValidHealingTargets(state, 0) === false, "there should be no valid healing targets");
+  assert(game.canPlayCard(state, 0, healCard) === false, "repair should be blocked with no wounded targets");
+  assert(game.playCard(state, 0, "heal") === false, "repair should not enter target mode when no healing target exists");
 });
 
 test("available actions detect when the player still has meaningful plays", () => {
@@ -1056,14 +1125,40 @@ test("winner is detected when player health reaches zero", () => {
   game.attackTarget(state, 0, "player");
 
   assert(state.winner && state.winner.id === 1, "player 1 should win after lethal attack");
+  assert(state.isWinnerModalOpen === true, "winner modal state should open when the game ends");
 });
 
 test("log keeps full history without truncating", () => {
   const state = game.createInitialState();
 
   for (let i = 0; i < 30; i += 1) {
-    state.log.unshift(`Entrada ${i}`);
+    state.log.push({
+      id: i + 2,
+      numero: i + 2,
+      texto: `Entrada ${i}`,
+      snapshot: game.createStateSnapshot(state)
+    });
   }
 
   assert(state.log.length > 12, "log should keep more than the old truncated size");
+});
+
+test("log entries stay chronological and snapshots allow rewind", () => {
+  const state = game.createInitialState();
+  const initialHandSize = state.players[0].hand.length;
+
+  state.players[0].manaAtual = 2;
+  state.players[0].manaMax = 2;
+  game.drawTurnCard(state, 0);
+
+  assert(state.log.length === 2, "drawing should append a second log line after the initial setup");
+  assert(state.log[0].numero === 1, "the first entry should stay numbered as action 1");
+  assert(state.log[1].numero === 2, "the new action should become number 2");
+  assert(state.log[1].snapshot.players[0].hand.length === initialHandSize + 1, "snapshot should capture the post-action hand size");
+
+  const rewound = game.rewindToLogEntry(state, 1);
+
+  assert(rewound.players[0].hand.length === initialHandSize, "rewind should restore the original hand size");
+  assert(rewound.log.length === 1, "rewind should discard future log entries");
+  assert(rewound.nextLogNumber === 2, "rewind should continue numbering from the restored point");
 });

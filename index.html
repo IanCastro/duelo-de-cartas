@@ -48,10 +48,6 @@
           <strong id="deck-count">0/32</strong>
         </div>
         <div class="deck-stat">
-          <span>Mana</span>
-          <strong id="mana-display">0/0</strong>
-        </div>
-        <div class="deck-stat">
           <span>Descarte</span>
           <strong id="discard-count">0</strong>
         </div>
@@ -68,10 +64,11 @@
           <div class="player-heading">
             <p class="player-label">Jogador 2</p>
             <button id="player-2-name" class="player-name-button" type="button" data-player-index="1">Guardiao Rubro</button>
+            <span id="player-2-target-hint" class="player-target-hint" hidden></span>
           </div>
           <div class="stat">
             <span class="stat-label">Vida</span>
-            <strong id="player-2-health">40</strong>
+            <strong id="player-2-health">40/40</strong>
           </div>
           <div class="stat">
             <span class="stat-label">Mana</span>
@@ -136,10 +133,11 @@
           <div class="player-heading">
             <p class="player-label">Jogador 1</p>
             <button id="player-1-name" class="player-name-button" type="button" data-player-index="0">Sentinela Azul</button>
+            <span id="player-1-target-hint" class="player-target-hint" hidden></span>
           </div>
           <div class="stat">
             <span class="stat-label">Vida</span>
-            <strong id="player-1-health">40</strong>
+            <strong id="player-1-health">40/40</strong>
           </div>
           <div class="stat">
             <span class="stat-label">Mana</span>
@@ -214,9 +212,9 @@
             <span>Regras atuais</span>
           </div>
           <p>Cada jogador comeca com 40 de vida e 4 cartas na mao. O baralho tem 32 cartas no total, com 4 copias de cada carta.</p>
-          <p>A mana aumenta a cada rodada ate 6. O segundo jogador recebe +1 de mana em todos os turnos para compensar a vantagem de comecar.</p>
+          <p>A mana aumenta a cada rodada ate 8. O segundo jogador recebe +1 de mana em todos os turnos para compensar a vantagem de comecar.</p>
           <p>Unidades ficam em campo. Suportes permanecem ativos. Efeitos entram em selecao de alvo e vao para o descarte quando resolvidos.</p>
-          <p>Cada unidade pode atacar no turno em que entra em campo e depois 1 vez por turno. Se o rival nao tiver unidades em campo, voce pode destruir um suporte com 1 ataque. Reparo Rapido cura o jogador ou uma unidade aliada em campo.</p>
+          <p>Cada unidade pode atacar no turno em que entra em campo e depois 1 vez por turno. Se o rival nao tiver unidades em campo, voce pode destruir um suporte com 1 ataque. Reparo Rapido so pode curar alvos feridos.</p>
         </section>
 
         <section class="side-panel log-panel" id="log-panel" aria-hidden="true">
@@ -224,7 +222,7 @@
             <span>Log da partida</span>
             <span id="winner-banner">Sem vencedor</span>
           </div>
-          <ol id="game-log"></ol>
+          <div id="game-log"></div>
         </section>
       </aside>
     </section>
@@ -232,6 +230,54 @@
     <div class="player-turn-actions" id="player-turn-actions-panel" hidden>
       <button id="draw-button" class="action-button" type="button" title="Atalho: C" aria-keyshortcuts="c">Comprar carta</button>
       <button id="end-turn-button" class="action-button secondary" type="button" title="Atalho: E" aria-keyshortcuts="e">Encerrar turno</button>
+    </div>
+
+    <div class="modal-backdrop" id="history-modal" aria-hidden="true">
+      <section class="modal-card history-modal-card" role="dialog" aria-modal="true" aria-labelledby="history-modal-title">
+        <div class="modal-header">
+          <div>
+            <p class="player-label">Linha do log</p>
+            <h2 id="history-modal-title">Estado da partida</h2>
+          </div>
+          <button id="close-history-modal-button" class="library-toggle modal-close" type="button">Fechar</button>
+        </div>
+        <p id="history-modal-text" class="modal-copy"></p>
+        <div class="history-preview-meta">
+          <div class="deck-stat">
+            <span>Turno</span>
+            <strong id="history-modal-turn">-</strong>
+          </div>
+          <div class="deck-stat">
+            <span>Baralho</span>
+            <strong id="history-modal-deck">-</strong>
+          </div>
+          <div class="deck-stat">
+            <span>Descarte</span>
+            <strong id="history-modal-discard">-</strong>
+          </div>
+        </div>
+        <div class="history-preview-grid" id="history-preview-grid"></div>
+        <div class="modal-actions">
+          <button id="rewind-history-button" class="action-button" type="button">Voltar para este momento</button>
+          <button id="resume-history-button" class="action-button secondary" type="button">Continuar a partida atual</button>
+        </div>
+      </section>
+    </div>
+
+    <div class="modal-backdrop" id="winner-modal" aria-hidden="true">
+      <section class="modal-card winner-modal-card" role="dialog" aria-modal="true" aria-labelledby="winner-modal-title">
+        <div class="modal-header">
+          <div>
+            <p class="player-label">Fim de jogo</p>
+            <h2 id="winner-modal-title">Vitoria</h2>
+          </div>
+        </div>
+        <p id="winner-modal-text" class="modal-copy"></p>
+        <div class="modal-actions">
+          <button id="close-winner-modal-button" class="action-button secondary" type="button">Fechar</button>
+          <button id="winner-restart-button" class="action-button" type="button">Nova partida</button>
+        </div>
+      </section>
     </div>
   </main>
 
