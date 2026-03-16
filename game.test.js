@@ -1185,6 +1185,41 @@ test("log entries stay chronological and snapshots allow rewind", () => {
   assert(rewound.nextLogNumber === 2, "rewind should continue numbering from the restored point");
 });
 
+test("attempting to rewind depends on confirmation", () => {
+  const state = game.createInitialState();
+  state.players[0].manaAtual = 2;
+  state.players[0].manaMax = 2;
+  game.drawTurnCard(state, 0);
+  let confirmCalls = 0;
+
+  const canceled = game.attemptRewindToLogEntry(state, 1, {
+    confirmFn: () => {
+      confirmCalls += 1;
+      return false;
+    }
+  });
+
+  assert(confirmCalls === 1, "rewind should ask for confirmation");
+  assert(canceled === state, "canceled rewind should keep the current state object");
+  assert(state.log.length === 2, "canceled rewind should keep the future log entries");
+});
+
+test("confirmed rewind restores the selected snapshot", () => {
+  const state = game.createInitialState();
+  const initialHandSize = state.players[0].hand.length;
+  state.players[0].manaAtual = 2;
+  state.players[0].manaMax = 2;
+  game.drawTurnCard(state, 0);
+
+  const rewound = game.attemptRewindToLogEntry(state, 1, {
+    confirmFn: () => true
+  });
+
+  assert(rewound !== state, "confirmed rewind should return a restored state");
+  assert(rewound.players[0].hand.length === initialHandSize, "confirmed rewind should restore the selected snapshot");
+  assert(rewound.log.length === 1, "confirmed rewind should truncate future history");
+});
+
 test("log display helper shows the newest entry first without renumbering", () => {
   const displayed = game.getDisplayLogEntries([
     { id: 1, numero: 1, texto: "Primeira" },

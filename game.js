@@ -265,6 +265,23 @@
     return restoreStateFromSnapshot(keptEntries[targetIndex].snapshot, keptEntries);
   }
 
+  function attemptRewindToLogEntry(state, entryId, options = {}) {
+    const targetEntry = state.log.find((entry) => entry.id === entryId);
+
+    if (!targetEntry) {
+      return state;
+    }
+
+    if (typeof options.confirmFn === "function") {
+      const confirmed = options.confirmFn(`Deseja voltar para a acao ${targetEntry.numero} e descartar o futuro da partida?`);
+      if (!confirmed) {
+        return state;
+      }
+    }
+
+    return rewindToLogEntry(state, entryId);
+  }
+
   function getCurrentPlayer(state) {
     return state.players[state.currentPlayerIndex];
   }
@@ -1668,7 +1685,9 @@
         return;
       }
 
-      gameState = rewindToLogEntry(gameState, gameState.selectedLogEntryId);
+      gameState = attemptRewindToLogEntry(gameState, gameState.selectedLogEntryId, {
+        confirmFn: typeof window !== "undefined" ? window.confirm.bind(window) : null
+      });
       render(gameState);
     });
 
@@ -1736,6 +1755,7 @@
       createStateSnapshot,
       restoreStateFromSnapshot,
       rewindToLogEntry,
+      attemptRewindToLogEntry,
       getDisplayLogEntries,
       isViewingHistory,
       getRenderedGameState,
