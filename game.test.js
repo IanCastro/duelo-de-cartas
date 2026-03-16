@@ -1245,6 +1245,23 @@ test("clicking the selected log entry again rewinds after confirmation", () => {
   assert(rewound.log.length === 1, "confirmed second click should discard future history");
 });
 
+test("clicking the latest log entry returns to the present moment", () => {
+  const state = game.createInitialState();
+  state.players[0].manaAtual = 2;
+  state.players[0].manaMax = 2;
+  game.drawTurnCard(state, 0);
+  state.isLogOpen = true;
+  state.selectedLogEntryId = 1;
+
+  const latestEntryId = state.log[state.log.length - 1].id;
+  const result = game.handleLogEntryClick(state, latestEntryId, {
+    confirmFn: () => false
+  });
+
+  assert(result === state, "returning to the present should keep the current state object");
+  assert(state.selectedLogEntryId === null, "clicking the latest entry should leave history view and return to the present");
+});
+
 test("log display helper shows the newest entry first without renumbering", () => {
   const displayed = game.getDisplayLogEntries([
     { id: 1, numero: 1, texto: "Primeira" },

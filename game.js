@@ -287,6 +287,12 @@
       return state;
     }
 
+    const latestEntry = state.log[state.log.length - 1] || null;
+    if (latestEntry && latestEntry.id === entryId) {
+      state.selectedLogEntryId = null;
+      return state;
+    }
+
     if (state.selectedLogEntryId === entryId) {
       return attemptRewindToLogEntry(state, entryId, options);
     }
