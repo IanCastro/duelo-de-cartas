@@ -138,6 +138,8 @@
       discardPile: [],
       currentPlayerIndex: 0,
       isLibraryOpen: false,
+      isRulesOpen: false,
+      isLogOpen: false,
       selectedAttackerId: null,
       selectedEffectCard: null,
       winner: null,
@@ -577,7 +579,7 @@
     }
 
     const tagName = typeof target.tagName === "string" ? target.tagName.toUpperCase() : "";
-    return ["INPUT", "TEXTAREA", "SELECT", "BUTTON", "A"].includes(tagName);
+    return ["INPUT", "TEXTAREA", "SELECT"].includes(tagName);
   }
 
   function handleShortcutAction(state, shortcutKey, options = {}) {
@@ -768,6 +770,25 @@
     }, {});
   }
 
+  function groupHandByCategory(cards) {
+    return cards.reduce((groups, card) => {
+      if (!groups[card.categoria]) {
+        groups[card.categoria] = [];
+      }
+
+      groups[card.categoria].push(card);
+      return groups;
+    }, {
+      unidade: [],
+      suporte: [],
+      efeito: []
+    });
+  }
+
+  function isAnySidePanelOpen(state) {
+    return Boolean(state.isLibraryOpen || state.isRulesOpen || state.isLogOpen);
+  }
+
   function buildCardMarkup(card, player, options = {}) {
     const displayData = getCardDisplayData(card, player, options);
     const countMarkup = options.countLabel
@@ -911,26 +932,35 @@
     const currentPlayer = getCurrentPlayer(state);
 
     state.players.forEach((player, index) => {
+      const groupedHand = groupHandByCategory(player.hand);
       document.getElementById(`player-${player.id}-health`).textContent = String(player.vida);
       document.getElementById(`player-${player.id}-hand-count`).textContent = `${player.hand.length} cartas`;
       document.getElementById(`player-${player.id}-board-count`).textContent = `${player.board.length} em campo`;
       document.getElementById(`player-${player.id}-support-count`).textContent = `${player.supportZone.length} suportes`;
       document.getElementById(`player-${player.id}-mana`).textContent = `${player.manaAtual}/${player.manaMax}`;
 
-      renderCardList(
-        `player-${player.id}-hand`,
-        player.hand,
-        (card) => createCardElement(card, {
-          interactive: index === state.currentPlayerIndex && !state.winner && canAfford(player, card.custo) && !state.selectedEffectCard,
-          className: player.id === 2 ? "opponent-card" : "",
-          player,
-          onClick: () => {
-            playCard(state, index, card.instanceId);
-            render(state);
-          }
-        }),
-        "Sem cartas na mao."
-      );
+      ["unidade", "suporte", "efeito"].forEach((category) => {
+        document.getElementById(`player-${player.id}-hand-${category}-count`).textContent = String(groupedHand[category].length);
+
+        renderCardList(
+          `player-${player.id}-hand-${category}`,
+          groupedHand[category],
+          (card) => createCardElement(card, {
+            interactive: index === state.currentPlayerIndex && !state.winner && canAfford(player, card.custo) && !state.selectedEffectCard,
+            className: player.id === 2 ? "opponent-card" : "",
+            player,
+            onClick: () => {
+              playCard(state, index, card.instanceId);
+              render(state);
+            }
+          }),
+          category === "unidade"
+            ? "Sem unidades."
+            : category === "suporte"
+              ? "Sem suportes."
+              : "Sem efeitos."
+        );
+      });
 
       renderCardList(
         `player-${player.id}-board`,
@@ -998,13 +1028,13 @@
       ? "A partida terminou. Inicie uma nova partida para jogar novamente."
       : state.selectedEffectCard
         ? state.selectedEffectCard.efeito === "cura_direta"
-          ? "Escolha uma unidade aliada ou use o botao central para curar o jogador atual."
-          : "Escolha uma unidade inimiga ou use o botao central para aplicar o dano direto no jogador rival."
+          ? "Escolha uma unidade aliada ou use o botao do painel para curar o jogador atual."
+          : "Escolha uma unidade inimiga ou use o botao do painel para atingir o jogador rival."
         : state.selectedAttackerId
           ? getOpponentPlayer(state).board.length === 0 && getOpponentPlayer(state).supportZone.length > 0
-            ? "Escolha uma unidade inimiga, um suporte inimigo sem protecao ou use o botao central para atacar o jogador rival."
-            : "Escolha uma unidade inimiga ou use o botao central para atacar o jogador rival."
-          : "Gaste mana para comprar e baixar cartas. Depois ataque com cada unidade pronta uma vez.";
+            ? "Escolha unidade, suporte exposto ou use o botao do painel para atacar o rival."
+            : "Escolha uma unidade inimiga ou use o botao do painel para atacar o rival."
+          : "Use sua mana, baixe cartas e ataque com unidades prontas.";
     document.getElementById("deck-count").textContent = `${state.deck.length}/${getTotalDeckSize()}`;
     document.getElementById("discard-count").textContent = String(state.discardPile.length);
     document.getElementById("mana-display").textContent = `${currentPlayer.manaAtual}/${currentPlayer.manaMax}`;
@@ -1012,15 +1042,43 @@
     document.getElementById("winner-banner").textContent = state.winner ? `${state.winner.nome} venceu` : "Sem vencedor";
 
     const boardElement = document.querySelector(".board");
+    const sideRail = document.getElementById("side-rail");
     const libraryPanel = document.getElementById("library-panel");
+    const rulesPanel = document.getElementById("rules-panel");
+    const logPanel = document.getElementById("log-panel");
     const toggleLibraryButton = document.getElementById("toggle-library-button");
+    const toggleRulesButton = document.getElementById("toggle-rules-button");
+    const toggleLogButton = document.getElementById("toggle-log-button");
+    const anySidePanelOpen = isAnySidePanelOpen(state);
 
-    if (boardElement && libraryPanel && toggleLibraryButton) {
-      boardElement.classList.toggle("board-with-library", state.isLibraryOpen);
+    if (boardElement && sideRail && libraryPanel && rulesPanel && logPanel && toggleLibraryButton && toggleRulesButton && toggleLogButton) {
+      boardElement.classList.toggle("board-with-side-rail", anySidePanelOpen);
+      sideRail.setAttribute("aria-hidden", String(!anySidePanelOpen));
       libraryPanel.setAttribute("aria-hidden", String(!state.isLibraryOpen));
+      rulesPanel.setAttribute("aria-hidden", String(!state.isRulesOpen));
+      logPanel.setAttribute("aria-hidden", String(!state.isLogOpen));
       toggleLibraryButton.classList.toggle("is-open", state.isLibraryOpen);
+      toggleRulesButton.classList.toggle("is-open", state.isRulesOpen);
+      toggleLogButton.classList.toggle("is-open", state.isLogOpen);
       toggleLibraryButton.setAttribute("aria-expanded", String(state.isLibraryOpen));
-      toggleLibraryButton.textContent = state.isLibraryOpen ? "Ocultar cartas" : "Mostrar cartas";
+      toggleRulesButton.setAttribute("aria-expanded", String(state.isRulesOpen));
+      toggleLogButton.setAttribute("aria-expanded", String(state.isLogOpen));
+    }
+
+    const actionPanel = document.getElementById("player-actions-panel");
+    const playerOneActionSlot = document.getElementById("player-1-actions-slot");
+    const playerTwoActionSlot = document.getElementById("player-2-actions-slot");
+
+    if (actionPanel && playerOneActionSlot && playerTwoActionSlot) {
+      const activeActionSlot = currentPlayer.id === 1 ? playerOneActionSlot : playerTwoActionSlot;
+      const inactiveActionSlot = currentPlayer.id === 1 ? playerTwoActionSlot : playerOneActionSlot;
+
+      activeActionSlot.hidden = false;
+      inactiveActionSlot.hidden = true;
+
+      if (actionPanel.parentElement !== activeActionSlot) {
+        activeActionSlot.appendChild(actionPanel);
+      }
     }
 
     const drawButton = document.getElementById("draw-button");
@@ -1054,6 +1112,16 @@
   function bindUI() {
     document.getElementById("toggle-library-button").addEventListener("click", () => {
       gameState.isLibraryOpen = !gameState.isLibraryOpen;
+      render(gameState);
+    });
+
+    document.getElementById("toggle-rules-button").addEventListener("click", () => {
+      gameState.isRulesOpen = !gameState.isRulesOpen;
+      render(gameState);
+    });
+
+    document.getElementById("toggle-log-button").addEventListener("click", () => {
+      gameState.isLogOpen = !gameState.isLogOpen;
       render(gameState);
     });
 
@@ -1137,7 +1205,9 @@
       getCardDisplayData,
       getCardOverlayData,
       getDeckCardCounts,
+      groupHandByCategory,
       getTotalDeckSize,
+      isAnySidePanelOpen,
       getAvailableActions,
       attemptEndTurn,
       cancelPendingAction,

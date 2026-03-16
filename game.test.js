@@ -161,7 +161,7 @@ test("keyboard shortcut escape cancels a prepared effect and refunds mana", () =
   assert(state.players[0].hand.length === 1, "escape should return the card to the hand");
 });
 
-test("keyboard shortcuts ignore interactive targets", () => {
+test("keyboard shortcuts still work when focus is on a button", () => {
   const state = game.createInitialState();
   const handBeforeDraw = state.players[0].hand.length;
 
@@ -169,8 +169,20 @@ test("keyboard shortcuts ignore interactive targets", () => {
     target: { tagName: "button" }
   });
 
-  assert(handled === false, "shortcut should be ignored while focus is on an interactive element");
-  assert(state.players[0].hand.length === handBeforeDraw, "ignored shortcut should not change the game state");
+  assert(handled === true, "shortcut should still work after a button keeps focus");
+  assert(state.players[0].hand.length === handBeforeDraw + 1, "button focus should not block the shortcut action");
+});
+
+test("keyboard shortcuts ignore editable targets", () => {
+  const state = game.createInitialState();
+  const handBeforeDraw = state.players[0].hand.length;
+
+  const handled = game.handleShortcutAction(state, "c", {
+    target: { tagName: "input" }
+  });
+
+  assert(handled === false, "shortcut should stay blocked inside editable controls");
+  assert(state.players[0].hand.length === handBeforeDraw, "editable focus should not change the game state");
 });
 
 test("playing a unit spends mana and the unit can attack immediately", () => {
@@ -307,6 +319,34 @@ test("deck card counts report how many copies remain in the baralho", () => {
   assert(counts["unit-1"] === 2, "count helper should accumulate repeated cards");
   assert(counts["support-1"] === 1, "count helper should track different card ids");
   assert((counts["effect-1"] || 0) === 0, "missing cards should read as zero when consumed by the UI");
+});
+
+test("group hand by category keeps cards in their correct columns", () => {
+  const grouped = game.groupHandByCategory([
+    { categoria: "efeito", nome: "Raio" },
+    { categoria: "unidade", nome: "Escudeiro" },
+    { categoria: "suporte", nome: "Estandarte" },
+    { categoria: "unidade", nome: "Arqueira" }
+  ]);
+
+  assert(grouped.unidade.length === 2, "unit cards should be grouped together");
+  assert(grouped.suporte.length === 1, "support cards should be grouped together");
+  assert(grouped.efeito.length === 1, "effect cards should be grouped together");
+  assert(grouped.unidade[0].nome === "Escudeiro", "grouping should preserve original order inside a category");
+});
+
+test("side rail helper reports when any optional panel is open", () => {
+  assert(game.isAnySidePanelOpen({
+    isLibraryOpen: false,
+    isRulesOpen: false,
+    isLogOpen: false
+  }) === false, "helper should stay false when all optional panels are closed");
+
+  assert(game.isAnySidePanelOpen({
+    isLibraryOpen: false,
+    isRulesOpen: true,
+    isLogOpen: false
+  }) === true, "helper should be true when any side panel is open");
 });
 
 test("unit health package matches the new rebalance", () => {
