@@ -252,6 +252,12 @@ select {
   background: linear-gradient(135deg, #9be1ff, #4fa7ff);
 }
 
+.action-button.ready-to-end-turn {
+  color: #082327;
+  background: linear-gradient(135deg, #8ff4d1, #46c9a2);
+  box-shadow: 0 0 0 1px rgba(143, 244, 209, 0.28), 0 12px 28px rgba(70, 201, 162, 0.2);
+}
+
 .action-button.ghost {
   color: var(--text);
   background: rgba(255, 255, 255, 0.06);

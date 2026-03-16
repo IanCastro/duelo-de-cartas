@@ -3,6 +3,7 @@
   const STARTING_HAND_SIZE = 4;
   const MAX_MANA = 6;
   const DRAW_COST = 1;
+  const CARD_COPIES_PER_TYPE = 4;
 
   const CARD_LIBRARY = [
     {
@@ -12,8 +13,8 @@
       imagem: "assets/cards/unit-1.png",
       custo: 1,
       ataque: 2,
-      vida: 3,
-      vidaBase: 3,
+      vida: 5,
+      vidaBase: 5,
       descricao: "Uma unidade equilibrada para segurar a linha."
     },
     {
@@ -23,8 +24,8 @@
       imagem: "assets/cards/unit-2.png",
       custo: 2,
       ataque: 3,
-      vida: 2,
-      vidaBase: 2,
+      vida: 3,
+      vidaBase: 3,
       descricao: "Causa dano rapido antes que o rival se organize."
     },
     {
@@ -34,8 +35,8 @@
       imagem: "assets/cards/unit-3.png",
       custo: 3,
       ataque: 1,
-      vida: 5,
-      vidaBase: 5,
+      vida: 8,
+      vidaBase: 8,
       descricao: "Resistente e ideal para travar o campo."
     },
     {
@@ -45,8 +46,8 @@
       imagem: "assets/cards/unit-4.png",
       custo: 4,
       ataque: 4,
-      vida: 2,
-      vidaBase: 2,
+      vida: 4,
+      vidaBase: 4,
       descricao: "Uma ameaca agressiva para abrir espaco."
     },
     {
@@ -87,9 +88,13 @@
       custo: 1,
       efeito: "cura_direta",
       valor: 6,
-      descricao: "Recupere 6 de vida imediatamente."
+      descricao: "Recupere 6 de vida no jogador ou em uma unidade aliada."
     }
   ];
+
+  function getTotalDeckSize() {
+    return CARD_LIBRARY.length * CARD_COPIES_PER_TYPE;
+  }
 
   function instantiateCard(card, suffix) {
     return {
@@ -99,12 +104,8 @@
   }
 
   function createDeck() {
-    return CARD_LIBRARY.flatMap((card) => [
-      instantiateCard(card, "a"),
-      instantiateCard(card, "b"),
-      instantiateCard(card, "c"),
-      instantiateCard(card, "d")
-    ]);
+    const suffixes = ["a", "b", "c", "d"].slice(0, CARD_COPIES_PER_TYPE);
+    return CARD_LIBRARY.flatMap((card) => suffixes.map((suffix) => instantiateCard(card, suffix)));
   }
 
   function shuffleDeck(cards) {
@@ -254,7 +255,7 @@
   }
 
   function drawTurnCard(state, playerIndex) {
-    if (state.winner || state.currentPlayerIndex !== playerIndex || state.selectedEffectCard) {
+    if (state.winner || state.currentPlayerIndex !== playerIndex || state.selectedEffectCard || state.selectedAttackerId) {
       return null;
     }
 
@@ -305,6 +306,25 @@
     return true;
   }
 
+  function resolveHealingEffectOnPlayer(state, card, player) {
+    const recovered = Math.min(card.valor, MAX_HEALTH - player.vida);
+    player.vida = Math.min(player.vida + card.valor, MAX_HEALTH);
+    addLog(state, `${player.nome} usou ${card.nome} e recuperou ${recovered} de vida.`);
+  }
+
+  function resolveHealingEffectOnUnit(state, card, player, targetInstanceId) {
+    const target = player.board.find((unit) => unit.instanceId === targetInstanceId);
+
+    if (!target) {
+      return false;
+    }
+
+    const recovered = Math.min(card.valor, target.vidaBase - target.vida);
+    target.vida = Math.min(target.vida + card.valor, target.vidaBase);
+    addLog(state, `${player.nome} usou ${card.nome} e recuperou ${recovered} de vida em ${target.nome}.`);
+    return true;
+  }
+
   function resolveEffectTarget(state, playerIndex, targetType, targetInstanceId) {
     if (state.winner || state.currentPlayerIndex !== playerIndex || !state.selectedEffectCard) {
       return false;
@@ -314,19 +334,28 @@
     const opponent = state.players[(playerIndex + 1) % 2];
     const card = state.selectedEffectCard;
 
-    if (card.efeito !== "dano_direto") {
-      return false;
-    }
-
     let resolved = false;
 
-    if (targetType === "player") {
-      resolveDamageEffectOnPlayer(state, card, player, opponent);
-      resolved = true;
+    if (card.efeito === "dano_direto") {
+      if (targetType === "player") {
+        resolveDamageEffectOnPlayer(state, card, player, opponent);
+        resolved = true;
+      }
+
+      if (targetType === "unit") {
+        resolved = resolveDamageEffectOnUnit(state, card, player, opponent, targetInstanceId);
+      }
     }
 
-    if (targetType === "unit") {
-      resolved = resolveDamageEffectOnUnit(state, card, player, opponent, targetInstanceId);
+    if (card.efeito === "cura_direta") {
+      if (targetType === "player") {
+        resolveHealingEffectOnPlayer(state, card, player);
+        resolved = true;
+      }
+
+      if (targetType === "ally-unit") {
+        resolved = resolveHealingEffectOnUnit(state, card, player, targetInstanceId);
+      }
     }
 
     if (!resolved) {
@@ -379,18 +408,12 @@
       return true;
     }
 
-    if (card.efeito === "dano_direto") {
+    if (card.efeito === "dano_direto" || card.efeito === "cura_direta") {
       state.selectedEffectCard = card;
       return true;
     }
 
     moveCardToDiscard(state, card);
-
-    if (card.efeito === "cura_direta") {
-      const recovered = Math.min(card.valor, MAX_HEALTH - player.vida);
-      player.vida = Math.min(player.vida + card.valor, MAX_HEALTH);
-      addLog(state, `${player.nome} usou ${card.nome} por ${card.custo} mana e recuperou ${recovered} de vida.`);
-    }
 
     checkWinner(state);
     return true;
@@ -440,6 +463,25 @@
       return true;
     }
 
+    if (targetType === "support") {
+      if (opponent.board.length > 0) {
+        attacker.jaAtacouNoTurno = false;
+        return false;
+      }
+
+      const targetIndex = opponent.supportZone.findIndex((card) => card.instanceId === targetInstanceId);
+
+      if (targetIndex === -1) {
+        attacker.jaAtacouNoTurno = false;
+        return false;
+      }
+
+      const [defeatedSupport] = opponent.supportZone.splice(targetIndex, 1);
+      moveCardToDiscard(state, defeatedSupport);
+      addLog(state, `${attacker.nome} destruiu o suporte ${defeatedSupport.nome}.`);
+      return true;
+    }
+
     const targetIndex = opponent.board.findIndex((card) => card.instanceId === targetInstanceId);
 
     if (targetIndex === -1) {
@@ -480,6 +522,51 @@
     return didCancel;
   }
 
+  function getAvailableActions(state, playerIndex = state.currentPlayerIndex) {
+    if (state.winner || state.currentPlayerIndex !== playerIndex) {
+      return {
+        canDraw: false,
+        playableCards: 0,
+        readyAttackers: 0,
+        pendingSelection: false,
+        hasAny: false
+      };
+    }
+
+    const player = state.players[playerIndex];
+    const canDraw = state.deck.length > 0 && canAfford(player, DRAW_COST);
+    const playableCards = player.hand.filter((card) => canAfford(player, card.custo)).length;
+    const readyAttackers = getAvailableAttackers(player).length;
+    const pendingSelection = Boolean(state.selectedAttackerId || state.selectedEffectCard);
+    const hasAny = canDraw || playableCards > 0 || readyAttackers > 0 || pendingSelection;
+
+    return {
+      canDraw,
+      playableCards,
+      readyAttackers,
+      pendingSelection,
+      hasAny
+    };
+  }
+
+  function attemptEndTurn(state, options = {}) {
+    if (state.winner) {
+      return false;
+    }
+
+    const availableActions = getAvailableActions(state, state.currentPlayerIndex);
+
+    if (availableActions.hasAny && typeof options.confirmFn === "function") {
+      const confirmed = options.confirmFn("Ainda ha acoes disponiveis neste turno. Deseja encerrar mesmo assim?");
+      if (!confirmed) {
+        return false;
+      }
+    }
+
+    endTurn(state);
+    return true;
+  }
+
   function isInteractiveShortcutTarget(target) {
     if (!target) {
       return false;
@@ -517,12 +604,7 @@
     }
 
     if (normalizedKey === "e") {
-      if (state.winner) {
-        return false;
-      }
-
-      endTurn(state);
-      return true;
+      return attemptEndTurn(state, options);
     }
 
     if (normalizedKey === "escape") {
@@ -615,11 +697,11 @@
 
     if (card.categoria === "efeito") {
       if (card.efeito === "dano_direto") {
-        return "LIVRE";
+        return "INIMIGO";
       }
 
       if (card.efeito === "cura_direta") {
-        return "PROPRIO";
+        return "ALIADO";
       }
     }
 
@@ -815,7 +897,7 @@
           item.setAttribute("aria-label", card.nome);
           item.innerHTML = buildCardMarkup(card, null, {
             showDynamicState: false,
-            countLabel: `${deckCounts[card.id] || 0} no baralho`
+            countLabel: `${deckCounts[card.id] || 0}/${CARD_COPIES_PER_TYPE} no baralho`
           });
 
           section.appendChild(item);
@@ -858,19 +940,22 @@
           const isSelected = card.instanceId === state.selectedAttackerId;
           const canSelect = isCurrentPlayer && !state.winner && card.podeAgir && !card.jaAtacouNoTurno && !state.selectedEffectCard;
           const canBeCombatTargeted = !isCurrentPlayer && Boolean(state.selectedAttackerId) && !state.winner;
-          const canBeEffectTargeted = !isCurrentPlayer && Boolean(state.selectedEffectCard) && state.selectedEffectCard.efeito === "dano_direto" && !state.winner;
+          const canBeDamageEffectTargeted = !isCurrentPlayer && Boolean(state.selectedEffectCard) && state.selectedEffectCard.efeito === "dano_direto" && !state.winner;
+          const canBeHealingEffectTargeted = isCurrentPlayer && Boolean(state.selectedEffectCard) && state.selectedEffectCard.efeito === "cura_direta" && !state.winner;
 
           return createCardElement(card, {
-            interactive: canSelect || canBeCombatTargeted || canBeEffectTargeted,
+            interactive: canSelect || canBeCombatTargeted || canBeDamageEffectTargeted || canBeHealingEffectTargeted,
             selected: isSelected,
-            className: (canBeCombatTargeted || canBeEffectTargeted) ? "targetable" : "",
+            className: (canBeCombatTargeted || canBeDamageEffectTargeted || canBeHealingEffectTargeted) ? "targetable" : "",
             onClick: () => {
               if (canSelect) {
                 selectAttacker(state, index, card.instanceId);
               } else if (canBeCombatTargeted) {
                 attackTarget(state, state.currentPlayerIndex, "unit", card.instanceId);
-              } else if (canBeEffectTargeted) {
+              } else if (canBeDamageEffectTargeted) {
                 resolveEffectTarget(state, state.currentPlayerIndex, "unit", card.instanceId);
+              } else if (canBeHealingEffectTargeted) {
+                resolveEffectTarget(state, state.currentPlayerIndex, "ally-unit", card.instanceId);
               }
               render(state);
             },
@@ -883,24 +968,44 @@
       renderCardList(
         `player-${player.id}-support`,
         player.supportZone,
-        (card) => createCardElement(card, {
-          interactive: false,
-          className: "support-card",
-          player
-        }),
+        (card) => {
+          const isCurrentPlayer = index === state.currentPlayerIndex;
+          const canBeSupportTargeted = !isCurrentPlayer
+            && Boolean(state.selectedAttackerId)
+            && !state.selectedEffectCard
+            && !state.winner
+            && player.board.length === 0;
+
+          return createCardElement(card, {
+            interactive: canBeSupportTargeted,
+            className: `support-card${canBeSupportTargeted ? " targetable" : ""}`,
+            onClick: () => {
+              if (canBeSupportTargeted) {
+                attackTarget(state, state.currentPlayerIndex, "support", card.instanceId);
+                render(state);
+              }
+            },
+            player
+          });
+        },
         "Nenhum suporte ativo."
       );
     });
 
+    const availableActions = getAvailableActions(state, state.currentPlayerIndex);
     document.getElementById("turn-indicator").textContent = state.winner ? `${state.winner.nome} venceu` : currentPlayer.nome;
     document.getElementById("turn-status").textContent = state.winner
       ? "A partida terminou. Inicie uma nova partida para jogar novamente."
       : state.selectedEffectCard
-        ? "Escolha uma unidade inimiga ou use o botao central para aplicar o dano direto no jogador rival."
+        ? state.selectedEffectCard.efeito === "cura_direta"
+          ? "Escolha uma unidade aliada ou use o botao central para curar o jogador atual."
+          : "Escolha uma unidade inimiga ou use o botao central para aplicar o dano direto no jogador rival."
         : state.selectedAttackerId
-          ? "Escolha uma unidade inimiga ou use o botao central para atacar o jogador rival."
+          ? getOpponentPlayer(state).board.length === 0 && getOpponentPlayer(state).supportZone.length > 0
+            ? "Escolha uma unidade inimiga, um suporte inimigo sem protecao ou use o botao central para atacar o jogador rival."
+            : "Escolha uma unidade inimiga ou use o botao central para atacar o jogador rival."
           : "Gaste mana para comprar e baixar cartas. Depois ataque com cada unidade pronta uma vez.";
-    document.getElementById("deck-count").textContent = String(state.deck.length);
+    document.getElementById("deck-count").textContent = `${state.deck.length}/${getTotalDeckSize()}`;
     document.getElementById("discard-count").textContent = String(state.discardPile.length);
     document.getElementById("mana-display").textContent = `${currentPlayer.manaAtual}/${currentPlayer.manaMax}`;
     document.getElementById("attacks-left").textContent = String(getAvailableAttackers(currentPlayer).length);
@@ -923,10 +1028,14 @@
     const cancelAttackButton = document.getElementById("cancel-attack-button");
     const endTurnButton = document.getElementById("end-turn-button");
 
-    drawButton.disabled = Boolean(state.winner) || Boolean(state.selectedAttackerId) || Boolean(state.selectedEffectCard) || !canAfford(currentPlayer, DRAW_COST);
+    drawButton.disabled = Boolean(state.winner) || Boolean(state.selectedAttackerId) || Boolean(state.selectedEffectCard) || !state.deck.length || !canAfford(currentPlayer, DRAW_COST);
     attackPlayerButton.disabled = Boolean(state.winner) || (!state.selectedAttackerId && !state.selectedEffectCard);
+    attackPlayerButton.textContent = state.selectedEffectCard && state.selectedEffectCard.efeito === "cura_direta"
+      ? "Curar jogador"
+      : "Atacar jogador";
     cancelAttackButton.disabled = !state.selectedAttackerId && !state.selectedEffectCard;
     endTurnButton.disabled = Boolean(state.winner);
+    endTurnButton.classList.toggle("ready-to-end-turn", !state.winner && !availableActions.hasAny);
 
     const logElement = document.getElementById("game-log");
     logElement.innerHTML = "";
@@ -953,7 +1062,7 @@
       render(gameState);
     });
 
-    document.getElementById("attack-player-button").addEventListener("click", () => {
+      document.getElementById("attack-player-button").addEventListener("click", () => {
       handleShortcutAction(gameState, "a");
       render(gameState);
     });
@@ -964,7 +1073,9 @@
     });
 
     document.getElementById("end-turn-button").addEventListener("click", () => {
-      handleShortcutAction(gameState, "e");
+      handleShortcutAction(gameState, "e", {
+        confirmFn: typeof window !== "undefined" ? window.confirm.bind(window) : null
+      });
       render(gameState);
     });
 
@@ -980,7 +1091,8 @@
 
       const didHandle = handleShortcutAction(gameState, event.key, {
         repeat: event.repeat,
-        target: event.target
+        target: event.target,
+        confirmFn: typeof window !== "undefined" ? window.confirm.bind(window) : null
       });
 
       if (!didHandle) {
@@ -1007,6 +1119,7 @@
       STARTING_HAND_SIZE,
       MAX_MANA,
       DRAW_COST,
+      CARD_COPIES_PER_TYPE,
       CARD_LIBRARY,
       createDeck,
       shuffleDeck,
@@ -1024,6 +1137,9 @@
       getCardDisplayData,
       getCardOverlayData,
       getDeckCardCounts,
+      getTotalDeckSize,
+      getAvailableActions,
+      attemptEndTurn,
       cancelPendingAction,
       handleShortcutAction,
       getUnitAttack,

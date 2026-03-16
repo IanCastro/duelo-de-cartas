@@ -64,6 +64,31 @@ test("drawing spends mana and fails without enough resource", () => {
   assert(secondDraw === null, "second draw should fail without mana");
 });
 
+test("drawing is blocked while an attack is being aimed", () => {
+  const state = game.createInitialState();
+  state.players[0].board = [{
+    id: "atk",
+    instanceId: "atk",
+    nome: "Atacante",
+    categoria: "unidade",
+    custo: 1,
+    ataque: 2,
+    vida: 3,
+    vidaBase: 3,
+    descricao: "",
+    estado: "campo",
+    podeAgir: true,
+    jaAtacouNoTurno: false
+  }];
+  game.selectAttacker(state, 0, "atk");
+  const deckBeforeDraw = state.deck.length;
+
+  const drawResult = game.drawTurnCard(state, 0);
+
+  assert(drawResult === null, "draw should not happen while an attacker is selected");
+  assert(state.deck.length === deckBeforeDraw, "blocked draw should not change the deck");
+});
+
 test("keyboard shortcut c buys a card when the action is available", () => {
   const state = game.createInitialState();
   const handBeforeDraw = state.players[0].hand.length;
@@ -269,6 +294,7 @@ test("deck size grows with 4 copies of each card", () => {
   const deck = game.createDeck();
 
   assert(deck.length === game.CARD_LIBRARY.length * 4, "deck should have four copies of each card");
+  assert(deck.length === game.getTotalDeckSize(), "deck size helper should match the real deck size");
 });
 
 test("deck card counts report how many copies remain in the baralho", () => {
@@ -281,6 +307,18 @@ test("deck card counts report how many copies remain in the baralho", () => {
   assert(counts["unit-1"] === 2, "count helper should accumulate repeated cards");
   assert(counts["support-1"] === 1, "count helper should track different card ids");
   assert((counts["effect-1"] || 0) === 0, "missing cards should read as zero when consumed by the UI");
+});
+
+test("unit health package matches the new rebalance", () => {
+  const escudeiro = game.CARD_LIBRARY.find((card) => card.id === "unit-1");
+  const arqueira = game.CARD_LIBRARY.find((card) => card.id === "unit-2");
+  const guardiao = game.CARD_LIBRARY.find((card) => card.id === "unit-3");
+  const berserker = game.CARD_LIBRARY.find((card) => card.id === "unit-4");
+
+  assert(escudeiro.vidaBase === 5, "Escudeiro Solar should have 5 base life");
+  assert(arqueira.vidaBase === 3, "Arqueira Nebulosa should have 3 base life");
+  assert(guardiao.vidaBase === 8, "Guardiao de Ferro should have 8 base life");
+  assert(berserker.vidaBase === 4, "Berserker Rubro should have 4 base life");
 });
 
 test("attack breakdown separates base and bonus", () => {
@@ -406,6 +444,92 @@ test("attack against a unit deals damage and discards it if defeated", () => {
   assert(state.discardPile.length === 1, "defeated unit should go to discard");
 });
 
+test("unit can attack an enemy support only when there are no enemy units in play", () => {
+  const state = game.createInitialState();
+  state.players[0].board = [{
+    id: "atk",
+    instanceId: "atk",
+    nome: "Atacante",
+    categoria: "unidade",
+    custo: 2,
+    ataque: 3,
+    vida: 3,
+    vidaBase: 3,
+    descricao: "",
+    estado: "campo",
+    podeAgir: true,
+    jaAtacouNoTurno: false
+  }];
+  state.players[1].supportZone = [{
+    id: "support-1",
+    instanceId: "support-1",
+    nome: "Estandarte de Guerra",
+    categoria: "suporte",
+    custo: 4,
+    efeito: "aura_ataque",
+    valor: 1,
+    descricao: "",
+    estado: "suporte"
+  }];
+
+  game.selectAttacker(state, 0, "atk");
+  const attacked = game.attackTarget(state, 0, "support", "support-1");
+
+  assert(attacked === true, "support should be attackable without enemy units protecting it");
+  assert(state.players[1].supportZone.length === 0, "destroyed support should leave the support zone");
+  assert(state.discardPile.length === 1, "destroyed support should go to discard");
+});
+
+test("support cannot be attacked while the opponent still has units in play", () => {
+  const state = game.createInitialState();
+  state.players[0].board = [{
+    id: "atk",
+    instanceId: "atk",
+    nome: "Atacante",
+    categoria: "unidade",
+    custo: 2,
+    ataque: 3,
+    vida: 3,
+    vidaBase: 3,
+    descricao: "",
+    estado: "campo",
+    podeAgir: true,
+    jaAtacouNoTurno: false
+  }];
+  state.players[1].board = [{
+    id: "guard",
+    instanceId: "guard",
+    nome: "Guardia",
+    categoria: "unidade",
+    custo: 2,
+    ataque: 1,
+    vida: 2,
+    vidaBase: 2,
+    descricao: "",
+    estado: "campo",
+    podeAgir: true,
+    jaAtacouNoTurno: false
+  }];
+  state.players[1].supportZone = [{
+    id: "support-1",
+    instanceId: "support-1",
+    nome: "Estandarte de Guerra",
+    categoria: "suporte",
+    custo: 4,
+    efeito: "aura_ataque",
+    valor: 1,
+    descricao: "",
+    estado: "suporte"
+  }];
+
+  game.selectAttacker(state, 0, "atk");
+  const attacked = game.attackTarget(state, 0, "support", "support-1");
+
+  assert(attacked === false, "support should stay protected while enemy units exist");
+  assert(state.players[1].supportZone.length === 1, "support should remain in play");
+  assert(state.players[0].board[0].jaAtacouNoTurno === false, "failed support attack should not spend the attack");
+});
+
 test("direct damage can hit the opposing player", () => {
   const state = game.createInitialState();
   state.players[0].manaAtual = 2;
@@ -504,6 +628,39 @@ test("direct damage cannot target allied units", () => {
   assert(state.selectedEffectCard !== null, "effect should remain waiting for a valid target");
 });
 
+test("direct damage cannot target supports", () => {
+  const state = game.createInitialState();
+  state.players[0].manaAtual = 2;
+  state.players[0].manaMax = 2;
+  state.players[0].hand = [{
+    id: "e",
+    instanceId: "e",
+    nome: "Raio",
+    categoria: "efeito",
+    custo: 1,
+    efeito: "dano_direto",
+    valor: 3,
+    descricao: ""
+  }];
+  state.players[1].supportZone = [{
+    id: "support-1",
+    instanceId: "support-1",
+    nome: "Estandarte de Guerra",
+    categoria: "suporte",
+    custo: 4,
+    efeito: "aura_ataque",
+    valor: 1,
+    descricao: "",
+    estado: "suporte"
+  }];
+
+  game.playCard(state, 0, "e");
+  const resolved = game.resolveEffectTarget(state, 0, "support", "support-1");
+
+  assert(resolved === false, "direct damage should not resolve on supports");
+  assert(state.selectedEffectCard !== null, "invalid support target should keep the effect waiting");
+});
+
 test("canceling prepared direct damage refunds mana and returns the card to hand", () => {
   const state = game.createInitialState();
   state.players[0].manaAtual = 2;
@@ -590,7 +747,7 @@ test("preparing direct damage does not log until it resolves", () => {
   assert(state.log.length === 0, "preparing the effect should not log by itself");
 });
 
-test("immediate healing restores 6 and respects the new max health", () => {
+test("repair can heal the player and respects the new max health", () => {
   const state = game.createInitialState();
   state.players[0].vida = 35;
   state.players[0].manaAtual = 2;
@@ -606,9 +763,141 @@ test("immediate healing restores 6 and respects the new max health", () => {
     descricao: ""
   }];
 
-  game.playCard(state, 0, "heal");
+  const played = game.playCard(state, 0, "heal");
+  const resolved = game.resolveEffectTarget(state, 0, "player");
 
+  assert(played === true, "healing card should enter target mode");
+  assert(resolved === true, "healing card should resolve on the player");
   assert(state.players[0].vida === 40, "healing should cap at the new max health");
+  assert(state.discardPile.length === 1, "healing card should move to discard after resolving");
+});
+
+test("repair can heal an allied unit without exceeding its base life", () => {
+  const state = game.createInitialState();
+  state.players[0].manaAtual = 2;
+  state.players[0].manaMax = 2;
+  state.players[0].hand = [{
+    id: "heal",
+    instanceId: "heal",
+    nome: "Reparo",
+    categoria: "efeito",
+    custo: 1,
+    efeito: "cura_direta",
+    valor: 6,
+    descricao: ""
+  }];
+  state.players[0].board = [{
+    id: "ally",
+    instanceId: "ally",
+    nome: "Aliada",
+    categoria: "unidade",
+    custo: 2,
+    ataque: 2,
+    vida: 2,
+    vidaBase: 5,
+    descricao: "",
+    estado: "campo",
+    podeAgir: true,
+    jaAtacouNoTurno: false
+  }];
+
+  game.playCard(state, 0, "heal");
+  const resolved = game.resolveEffectTarget(state, 0, "ally-unit", "ally");
+
+  assert(resolved === true, "healing should resolve on an allied unit");
+  assert(state.players[0].board[0].vida === 5, "healing should stop at the unit base life");
+  assert(state.discardPile.length === 1, "healing card should go to discard after healing an ally");
+});
+
+test("available actions detect when the player still has meaningful plays", () => {
+  const state = game.createInitialState();
+  state.players[0].hand = [{
+    id: "cheap",
+    instanceId: "cheap",
+    nome: "Carta Barata",
+    categoria: "efeito",
+    custo: 1,
+    efeito: "dano_direto",
+    valor: 3,
+    descricao: ""
+  }];
+
+  const available = game.getAvailableActions(state, 0);
+
+  assert(available.canDraw === true, "opening hand should allow drawing with 1 mana");
+  assert(available.playableCards === 1, "available actions should count affordable cards in hand");
+  assert(available.hasAny === true, "player should still have available actions");
+});
+
+test("available actions report no actions when mana, cards, and attacks are exhausted", () => {
+  const state = game.createInitialState();
+  state.deck = [];
+  state.players[0].manaAtual = 0;
+  state.players[0].manaMax = 0;
+  state.players[0].hand = [{
+    id: "expensive",
+    instanceId: "expensive",
+    nome: "Carta Cara",
+    categoria: "suporte",
+    custo: 4,
+    efeito: "aura_ataque",
+    valor: 1,
+    descricao: ""
+  }];
+  state.players[0].board = [{
+    id: "spent",
+    instanceId: "spent",
+    nome: "Exausta",
+    categoria: "unidade",
+    custo: 1,
+    ataque: 1,
+    vida: 1,
+    vidaBase: 1,
+    descricao: "",
+    estado: "campo",
+    podeAgir: true,
+    jaAtacouNoTurno: true
+  }];
+
+  const available = game.getAvailableActions(state, 0);
+
+  assert(available.hasAny === false, "player should have no actions left in this exhausted state");
+});
+
+test("attempting to end turn with available actions depends on confirmation", () => {
+  const state = game.createInitialState();
+  let confirmCalls = 0;
+
+  const canceled = game.attemptEndTurn(state, {
+    confirmFn: () => {
+      confirmCalls += 1;
+      return false;
+    }
+  });
+
+  assert(canceled === false, "turn should stay active when confirmation is rejected");
+  assert(confirmCalls === 1, "confirmation should run when actions are still available");
+  assert(state.currentPlayerIndex === 0, "player should keep the turn after rejecting confirmation");
+});
+
+test("ending turn without actions left should not ask for confirmation", () => {
+  const state = game.createInitialState();
+  state.deck = [];
+  state.players[0].manaAtual = 0;
+  state.players[0].manaMax = 0;
+  state.players[0].hand = [];
+  let confirmCalls = 0;
+
+  const ended = game.attemptEndTurn(state, {
+    confirmFn: () => {
+      confirmCalls += 1;
+      return true;
+    }
+  });
+
+  assert(ended === true, "turn should end immediately when no actions remain");
+  assert(confirmCalls === 0, "no confirmation should be requested with no actions left");
+  assert(state.currentPlayerIndex === 1, "turn should pass to the next player");
 });
 
 test("winner is detected when player health reaches zero", () => {
