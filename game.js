@@ -143,7 +143,6 @@
       selectedAttackerId: null,
       selectedEffectCard: null,
       selectedLogEntryId: null,
-      isHistoryPreviewOpen: false,
       isWinnerModalOpen: false,
       winner: null,
       turnNumber: 1,
@@ -227,7 +226,6 @@
       selectedAttackerId: snapshot.selectedAttackerId,
       selectedEffectCard: cloneData(snapshot.selectedEffectCard),
       selectedLogEntryId: null,
-      isHistoryPreviewOpen: false,
       isWinnerModalOpen: Boolean(snapshot.winnerPlayerId),
       winner: null,
       turnNumber: snapshot.turnNumber,
@@ -1184,6 +1182,18 @@
     return [...logEntries].reverse();
   }
 
+  function getSelectedLogEntry(state) {
+    if (!state || state.selectedLogEntryId == null) {
+      return null;
+    }
+
+    return state.log.find((entry) => entry.id === state.selectedLogEntryId) || null;
+  }
+
+  function isHistoryPreviewVisible(state) {
+    return Boolean(state && state.isLogOpen && getSelectedLogEntry(state));
+  }
+
   function renderHistoryPreview(state) {
     const historyPanel = document.getElementById("history-preview-panel");
     const historyTitle = document.getElementById("history-preview-title");
@@ -1197,17 +1207,13 @@
       return;
     }
 
-    historyPanel.hidden = !state.isHistoryPreviewOpen;
     historyGrid.innerHTML = "";
+    const selectedEntry = getSelectedLogEntry(state);
+    const isVisible = Boolean(state.isLogOpen && selectedEntry);
+    historyPanel.hidden = !isVisible;
+    historyPanel.setAttribute("aria-hidden", String(!isVisible));
 
-    if (!state.isHistoryPreviewOpen) {
-      return;
-    }
-
-    const selectedEntry = state.log.find((entry) => entry.id === state.selectedLogEntryId);
-
-    if (!selectedEntry) {
-      historyPanel.hidden = true;
+    if (!isVisible || !selectedEntry) {
       return;
     }
 
@@ -1415,9 +1421,12 @@
     const toggleRulesButton = document.getElementById("toggle-rules-button");
     const toggleLogButton = document.getElementById("toggle-log-button");
     const anySidePanelOpen = isAnySidePanelOpen(state);
+    const historyPreviewVisible = isHistoryPreviewVisible(state);
+    const historyPreviewPanel = document.getElementById("history-preview-panel");
 
     if (boardElement && sideRail && libraryPanel && rulesPanel && logPanel && toggleLibraryButton && toggleRulesButton && toggleLogButton) {
       boardElement.classList.toggle("board-with-side-rail", anySidePanelOpen);
+      boardElement.classList.toggle("board-with-history-preview", historyPreviewVisible);
       sideRail.setAttribute("aria-hidden", String(!anySidePanelOpen));
       libraryPanel.setAttribute("aria-hidden", String(!state.isLibraryOpen));
       rulesPanel.setAttribute("aria-hidden", String(!state.isRulesOpen));
@@ -1428,6 +1437,11 @@
       toggleLibraryButton.setAttribute("aria-expanded", String(state.isLibraryOpen));
       toggleRulesButton.setAttribute("aria-expanded", String(state.isRulesOpen));
       toggleLogButton.setAttribute("aria-expanded", String(state.isLogOpen));
+    }
+
+    if (historyPreviewPanel) {
+      historyPreviewPanel.hidden = !historyPreviewVisible;
+      historyPreviewPanel.setAttribute("aria-hidden", String(!historyPreviewVisible));
     }
 
     const turnActionsPanel = document.getElementById("player-turn-actions-panel");
@@ -1487,14 +1501,13 @@
     getDisplayLogEntries(state.log).forEach((entry) => {
       const item = document.createElement("button");
       item.type = "button";
-      item.className = `log-entry${state.selectedLogEntryId === entry.id && state.isHistoryPreviewOpen ? " is-selected" : ""}`;
+      item.className = `log-entry${state.selectedLogEntryId === entry.id ? " is-selected" : ""}`;
       item.innerHTML = `
         <span class="log-entry-number">${entry.numero}</span>
         <span class="log-entry-text">${entry.texto}</span>
       `;
       item.addEventListener("click", () => {
-        state.selectedLogEntryId = entry.id;
-        state.isHistoryPreviewOpen = true;
+        state.selectedLogEntryId = state.selectedLogEntryId === entry.id ? null : entry.id;
         render(state);
       });
       logElement.appendChild(item);
@@ -1522,16 +1535,21 @@
   function bindUI() {
     document.getElementById("toggle-library-button").addEventListener("click", () => {
       toggleExclusiveSidePanel(gameState, "library");
+      gameState.selectedLogEntryId = null;
       render(gameState);
     });
 
     document.getElementById("toggle-rules-button").addEventListener("click", () => {
       toggleExclusiveSidePanel(gameState, "rules");
+      gameState.selectedLogEntryId = null;
       render(gameState);
     });
 
     document.getElementById("toggle-log-button").addEventListener("click", () => {
       toggleExclusiveSidePanel(gameState, "log");
+      if (!gameState.isLogOpen) {
+        gameState.selectedLogEntryId = null;
+      }
       render(gameState);
     });
 
@@ -1571,13 +1589,11 @@
     });
 
     document.getElementById("close-history-preview-button").addEventListener("click", () => {
-      gameState.isHistoryPreviewOpen = false;
       gameState.selectedLogEntryId = null;
       render(gameState);
     });
 
     document.getElementById("resume-history-preview-button").addEventListener("click", () => {
-      gameState.isHistoryPreviewOpen = false;
       gameState.selectedLogEntryId = null;
       render(gameState);
     });
@@ -1655,6 +1671,7 @@
       restoreStateFromSnapshot,
       rewindToLogEntry,
       getDisplayLogEntries,
+      isHistoryPreviewVisible,
       groupHandByCategory,
       getTotalDeckSize,
       isAnySidePanelOpen,

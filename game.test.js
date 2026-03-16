@@ -853,8 +853,10 @@ test("layout markup removes the cancel button and keeps a pending effect slot", 
   assert(!html.includes("id=\"mana-display\""), "top bar should no longer render redundant mana");
   assert(html.includes("id=\"winner-modal\""), "winner modal markup should exist");
   assert(!html.includes("id=\"history-modal\""), "history preview should no longer use its own modal");
-  assert(html.includes("id=\"history-preview-panel\""), "log panel should expose an inline history preview");
-  assert(html.includes("id=\"resume-history-preview-button\""), "inline history preview should keep the continue action");
+  assert(html.includes("class=\"history-floating-panel\""), "history preview should render as a floating panel");
+  assert(html.includes("id=\"history-preview-panel\""), "history preview markup should exist");
+  assert(html.indexOf("id=\"history-preview-panel\"") > html.indexOf("</aside>"), "history preview should live outside the log rail");
+  assert(html.includes("id=\"resume-history-preview-button\""), "floating history preview should keep the continue action");
 });
 
 test("estandarte de guerra now costs 5 mana", () => {
@@ -1175,4 +1177,19 @@ test("log display helper shows the newest entry first without renumbering", () =
   assert(displayed[0].numero === 3, "newest entry should render first");
   assert(displayed[1].numero === 2, "middle entry should stay in the middle");
   assert(displayed[2].numero === 1, "oldest entry should render last");
+});
+
+test("history preview visibility depends on log panel and a selected entry", () => {
+  const state = game.createInitialState();
+
+  assert(game.isHistoryPreviewVisible(state) === false, "preview should stay hidden with no selected line");
+
+  state.selectedLogEntryId = 1;
+  assert(game.isHistoryPreviewVisible(state) === false, "preview should stay hidden while the log menu is closed");
+
+  state.isLogOpen = true;
+  assert(game.isHistoryPreviewVisible(state) === true, "preview should open only when the log is open and a line is selected");
+
+  state.selectedLogEntryId = 999;
+  assert(game.isHistoryPreviewVisible(state) === false, "preview should hide again if the selected entry no longer exists");
 });

@@ -222,40 +222,39 @@
             <span>Log da partida</span>
             <span id="winner-banner">Sem vencedor</span>
           </div>
-          <div class="log-layout">
-            <div id="game-log"></div>
-            <section class="history-inline-panel" id="history-preview-panel" hidden>
-              <div class="history-inline-header">
-                <div>
-                  <p class="player-label">Linha do log</p>
-                  <h3 id="history-preview-title">Estado da partida</h3>
-                </div>
-                <button id="close-history-preview-button" class="library-toggle modal-close" type="button">Fechar</button>
-              </div>
-              <p id="history-preview-text" class="modal-copy"></p>
-              <div class="history-preview-meta">
-                <div class="deck-stat">
-                  <span>Turno</span>
-                  <strong id="history-preview-turn">-</strong>
-                </div>
-                <div class="deck-stat">
-                  <span>Baralho</span>
-                  <strong id="history-preview-deck">-</strong>
-                </div>
-                <div class="deck-stat">
-                  <span>Descarte</span>
-                  <strong id="history-preview-discard">-</strong>
-                </div>
-              </div>
-              <div class="history-preview-grid" id="history-preview-grid"></div>
-              <div class="modal-actions history-inline-actions">
-                <button id="rewind-history-button" class="action-button" type="button">Voltar para este momento</button>
-                <button id="resume-history-preview-button" class="action-button secondary" type="button">Continuar a partida atual</button>
-              </div>
-            </section>
-          </div>
+          <div id="game-log"></div>
         </section>
       </aside>
+
+      <section class="history-floating-panel" id="history-preview-panel" aria-hidden="true" hidden>
+        <div class="history-floating-header">
+          <div>
+            <p class="player-label">Linha do log</p>
+            <h3 id="history-preview-title">Estado da partida</h3>
+          </div>
+          <button id="close-history-preview-button" class="library-toggle modal-close" type="button">Fechar</button>
+        </div>
+        <p id="history-preview-text" class="modal-copy"></p>
+        <div class="history-preview-meta">
+          <div class="deck-stat">
+            <span>Turno</span>
+            <strong id="history-preview-turn">-</strong>
+          </div>
+          <div class="deck-stat">
+            <span>Baralho</span>
+            <strong id="history-preview-deck">-</strong>
+          </div>
+          <div class="deck-stat">
+            <span>Descarte</span>
+            <strong id="history-preview-discard">-</strong>
+          </div>
+        </div>
+        <div class="history-preview-grid" id="history-preview-grid"></div>
+        <div class="modal-actions history-floating-actions">
+          <button id="rewind-history-button" class="action-button" type="button">Voltar para este momento</button>
+          <button id="resume-history-preview-button" class="action-button secondary" type="button">Continuar a partida atual</button>
+        </div>
+      </section>
     </section>
 
     <div class="player-turn-actions" id="player-turn-actions-panel" hidden>
