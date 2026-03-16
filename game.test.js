@@ -271,6 +271,18 @@ test("deck size grows with 4 copies of each card", () => {
   assert(deck.length === game.CARD_LIBRARY.length * 4, "deck should have four copies of each card");
 });
 
+test("deck card counts report how many copies remain in the baralho", () => {
+  const counts = game.getDeckCardCounts([
+    { id: "unit-1" },
+    { id: "unit-1" },
+    { id: "support-1" }
+  ]);
+
+  assert(counts["unit-1"] === 2, "count helper should accumulate repeated cards");
+  assert(counts["support-1"] === 1, "count helper should track different card ids");
+  assert((counts["effect-1"] || 0) === 0, "missing cards should read as zero when consumed by the UI");
+});
+
 test("attack breakdown separates base and bonus", () => {
   const player = {
     supportZone: [{ efeito: "aura_ataque", valor: 2 }]

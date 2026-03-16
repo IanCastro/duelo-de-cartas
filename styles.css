@@ -440,12 +440,12 @@ select {
 
 .card-art {
   margin: 0;
-  aspect-ratio: 4 / 3;
+  aspect-ratio: 16 / 9;
 }
 
 .library-art {
   margin: 0;
-  aspect-ratio: 4 / 3;
+  aspect-ratio: 16 / 9;
 }
 
 .card-art img,
@@ -487,6 +487,14 @@ select {
   font-size: 0.78rem;
   line-height: 1.4;
   min-height: 3.3em;
+}
+
+.card-count-note {
+  margin: 2px 0 0;
+  color: var(--accent);
+  font-size: 0.72rem;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
 }
 
 .card-stats {

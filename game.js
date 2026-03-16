@@ -679,8 +679,18 @@
     return data;
   }
 
+  function getDeckCardCounts(deck) {
+    return deck.reduce((counts, card) => {
+      counts[card.id] = (counts[card.id] || 0) + 1;
+      return counts;
+    }, {});
+  }
+
   function buildCardMarkup(card, player, options = {}) {
     const displayData = getCardDisplayData(card, player, options);
+    const countMarkup = options.countLabel
+      ? `<div class="card-count-note">${options.countLabel}</div>`
+      : "";
     const stateMarkup = displayData.stateText
       ? `<div class="card-state">${displayData.stateText}</div>`
       : "";
@@ -709,6 +719,7 @@
         <div class="card-body">
           <h3 class="card-title">${displayData.nome}</h3>
           <p class="card-description">${displayData.descricao}</p>
+          ${countMarkup}
         </div>
         <div class="card-stats">
           <div class="card-stat-chip">
@@ -776,7 +787,7 @@
     });
   }
 
-  function renderLibrary() {
+  function renderLibrary(state) {
     const libraryElement = document.getElementById("card-library");
 
     if (!libraryElement) {
@@ -784,6 +795,7 @@
     }
 
     libraryElement.innerHTML = "";
+    const deckCounts = state ? getDeckCardCounts(state.deck) : {};
 
     ["unidade", "suporte", "efeito"].forEach((category) => {
       const section = document.createElement("section");
@@ -801,7 +813,10 @@
           item.className = "library-card";
 
           item.setAttribute("aria-label", card.nome);
-          item.innerHTML = buildCardMarkup(card, null, { showDynamicState: false });
+          item.innerHTML = buildCardMarkup(card, null, {
+            showDynamicState: false,
+            countLabel: `${deckCounts[card.id] || 0} no baralho`
+          });
 
           section.appendChild(item);
         });
@@ -921,7 +936,7 @@
       logElement.appendChild(item);
     });
 
-    renderLibrary();
+    renderLibrary(state);
 
     document.getElementById("player-bottom-panel").classList.toggle("active", state.currentPlayerIndex === 0 && !state.winner);
     document.getElementById("player-top-panel").classList.toggle("active", state.currentPlayerIndex === 1 && !state.winner);
@@ -1008,6 +1023,7 @@
       getUnitAttackBreakdown,
       getCardDisplayData,
       getCardOverlayData,
+      getDeckCardCounts,
       cancelPendingAction,
       handleShortcutAction,
       getUnitAttack,
