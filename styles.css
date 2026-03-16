@@ -818,13 +818,14 @@ select {
 }
 
 .library-section {
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 10px;
 }
 
 .library-title {
   margin: 0;
+  grid-column: 1 / -1;
   font-size: 0.9rem;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -832,6 +833,7 @@ select {
 }
 
 .library-card {
+  min-width: 0;
   padding: 10px;
   border-radius: 18px;
   background: rgba(255, 255, 255, 0.04);
@@ -1073,6 +1075,10 @@ select {
   }
 
   .history-preview-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .library-section {
     grid-template-columns: 1fr;
   }
 
