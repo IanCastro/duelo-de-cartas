@@ -1180,20 +1180,24 @@
     return item;
   }
 
+  function getDisplayLogEntries(logEntries) {
+    return [...logEntries].reverse();
+  }
+
   function renderHistoryPreview(state) {
-    const historyModal = document.getElementById("history-modal");
-    const historyTitle = document.getElementById("history-modal-title");
-    const historyText = document.getElementById("history-modal-text");
-    const historyTurn = document.getElementById("history-modal-turn");
-    const historyDeck = document.getElementById("history-modal-deck");
-    const historyDiscard = document.getElementById("history-modal-discard");
+    const historyPanel = document.getElementById("history-preview-panel");
+    const historyTitle = document.getElementById("history-preview-title");
+    const historyText = document.getElementById("history-preview-text");
+    const historyTurn = document.getElementById("history-preview-turn");
+    const historyDeck = document.getElementById("history-preview-deck");
+    const historyDiscard = document.getElementById("history-preview-discard");
     const historyGrid = document.getElementById("history-preview-grid");
 
-    if (!historyModal || !historyTitle || !historyText || !historyTurn || !historyDeck || !historyDiscard || !historyGrid) {
+    if (!historyPanel || !historyTitle || !historyText || !historyTurn || !historyDeck || !historyDiscard || !historyGrid) {
       return;
     }
 
-    historyModal.setAttribute("aria-hidden", String(!state.isHistoryPreviewOpen));
+    historyPanel.hidden = !state.isHistoryPreviewOpen;
     historyGrid.innerHTML = "";
 
     if (!state.isHistoryPreviewOpen) {
@@ -1203,6 +1207,7 @@
     const selectedEntry = state.log.find((entry) => entry.id === state.selectedLogEntryId);
 
     if (!selectedEntry) {
+      historyPanel.hidden = true;
       return;
     }
 
@@ -1479,7 +1484,7 @@
 
     const logElement = document.getElementById("game-log");
     logElement.innerHTML = "";
-    state.log.forEach((entry) => {
+    getDisplayLogEntries(state.log).forEach((entry) => {
       const item = document.createElement("button");
       item.type = "button";
       item.className = `log-entry${state.selectedLogEntryId === entry.id && state.isHistoryPreviewOpen ? " is-selected" : ""}`;
@@ -1565,13 +1570,13 @@
       render(gameState);
     });
 
-    document.getElementById("close-history-modal-button").addEventListener("click", () => {
+    document.getElementById("close-history-preview-button").addEventListener("click", () => {
       gameState.isHistoryPreviewOpen = false;
       gameState.selectedLogEntryId = null;
       render(gameState);
     });
 
-    document.getElementById("resume-history-button").addEventListener("click", () => {
+    document.getElementById("resume-history-preview-button").addEventListener("click", () => {
       gameState.isHistoryPreviewOpen = false;
       gameState.selectedLogEntryId = null;
       render(gameState);
@@ -1649,6 +1654,7 @@
       createStateSnapshot,
       restoreStateFromSnapshot,
       rewindToLogEntry,
+      getDisplayLogEntries,
       groupHandByCategory,
       getTotalDeckSize,
       isAnySidePanelOpen,

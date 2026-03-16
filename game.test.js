@@ -852,7 +852,9 @@ test("layout markup removes the cancel button and keeps a pending effect slot", 
   assert(html.includes("player-2-pending-slot"), "inactive player area should expose a pending effect slot");
   assert(!html.includes("id=\"mana-display\""), "top bar should no longer render redundant mana");
   assert(html.includes("id=\"winner-modal\""), "winner modal markup should exist");
-  assert(html.includes("id=\"history-modal\""), "history modal markup should exist");
+  assert(!html.includes("id=\"history-modal\""), "history preview should no longer use its own modal");
+  assert(html.includes("id=\"history-preview-panel\""), "log panel should expose an inline history preview");
+  assert(html.includes("id=\"resume-history-preview-button\""), "inline history preview should keep the continue action");
 });
 
 test("estandarte de guerra now costs 5 mana", () => {
@@ -1161,4 +1163,16 @@ test("log entries stay chronological and snapshots allow rewind", () => {
   assert(rewound.players[0].hand.length === initialHandSize, "rewind should restore the original hand size");
   assert(rewound.log.length === 1, "rewind should discard future log entries");
   assert(rewound.nextLogNumber === 2, "rewind should continue numbering from the restored point");
+});
+
+test("log display helper shows the newest entry first without renumbering", () => {
+  const displayed = game.getDisplayLogEntries([
+    { id: 1, numero: 1, texto: "Primeira" },
+    { id: 2, numero: 2, texto: "Segunda" },
+    { id: 3, numero: 3, texto: "Terceira" }
+  ]);
+
+  assert(displayed[0].numero === 3, "newest entry should render first");
+  assert(displayed[1].numero === 2, "middle entry should stay in the middle");
+  assert(displayed[2].numero === 1, "oldest entry should render last");
 });

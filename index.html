@@ -222,7 +222,38 @@
             <span>Log da partida</span>
             <span id="winner-banner">Sem vencedor</span>
           </div>
-          <div id="game-log"></div>
+          <div class="log-layout">
+            <div id="game-log"></div>
+            <section class="history-inline-panel" id="history-preview-panel" hidden>
+              <div class="history-inline-header">
+                <div>
+                  <p class="player-label">Linha do log</p>
+                  <h3 id="history-preview-title">Estado da partida</h3>
+                </div>
+                <button id="close-history-preview-button" class="library-toggle modal-close" type="button">Fechar</button>
+              </div>
+              <p id="history-preview-text" class="modal-copy"></p>
+              <div class="history-preview-meta">
+                <div class="deck-stat">
+                  <span>Turno</span>
+                  <strong id="history-preview-turn">-</strong>
+                </div>
+                <div class="deck-stat">
+                  <span>Baralho</span>
+                  <strong id="history-preview-deck">-</strong>
+                </div>
+                <div class="deck-stat">
+                  <span>Descarte</span>
+                  <strong id="history-preview-discard">-</strong>
+                </div>
+              </div>
+              <div class="history-preview-grid" id="history-preview-grid"></div>
+              <div class="modal-actions history-inline-actions">
+                <button id="rewind-history-button" class="action-button" type="button">Voltar para este momento</button>
+                <button id="resume-history-preview-button" class="action-button secondary" type="button">Continuar a partida atual</button>
+              </div>
+            </section>
+          </div>
         </section>
       </aside>
     </section>
@@ -230,38 +261,6 @@
     <div class="player-turn-actions" id="player-turn-actions-panel" hidden>
       <button id="draw-button" class="action-button" type="button" title="Atalho: C" aria-keyshortcuts="c">Comprar carta</button>
       <button id="end-turn-button" class="action-button secondary" type="button" title="Atalho: E" aria-keyshortcuts="e">Encerrar turno</button>
-    </div>
-
-    <div class="modal-backdrop" id="history-modal" aria-hidden="true">
-      <section class="modal-card history-modal-card" role="dialog" aria-modal="true" aria-labelledby="history-modal-title">
-        <div class="modal-header">
-          <div>
-            <p class="player-label">Linha do log</p>
-            <h2 id="history-modal-title">Estado da partida</h2>
-          </div>
-          <button id="close-history-modal-button" class="library-toggle modal-close" type="button">Fechar</button>
-        </div>
-        <p id="history-modal-text" class="modal-copy"></p>
-        <div class="history-preview-meta">
-          <div class="deck-stat">
-            <span>Turno</span>
-            <strong id="history-modal-turn">-</strong>
-          </div>
-          <div class="deck-stat">
-            <span>Baralho</span>
-            <strong id="history-modal-deck">-</strong>
-          </div>
-          <div class="deck-stat">
-            <span>Descarte</span>
-            <strong id="history-modal-discard">-</strong>
-          </div>
-        </div>
-        <div class="history-preview-grid" id="history-preview-grid"></div>
-        <div class="modal-actions">
-          <button id="rewind-history-button" class="action-button" type="button">Voltar para este momento</button>
-          <button id="resume-history-button" class="action-button secondary" type="button">Continuar a partida atual</button>
-        </div>
-      </section>
     </div>
 
     <div class="modal-backdrop" id="winner-modal" aria-hidden="true">

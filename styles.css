@@ -186,17 +186,18 @@ select {
   display: none;
 }
 
-.player-summary,
+.player-summary {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto auto;
+  align-items: start;
+  gap: 12px;
+}
+
 .hand-meta,
 .action-panel {
   display: flex;
   justify-content: space-between;
   gap: 12px;
-}
-
-.player-summary {
-  align-items: center;
-  flex-wrap: nowrap;
 }
 
 .player-heading {
@@ -290,6 +291,7 @@ select {
 
 .player-turn-actions-slot {
   flex: 0 0 auto;
+  justify-self: end;
 }
 
 .player-turn-actions {
@@ -430,19 +432,28 @@ select {
 }
 
 .log-panel {
-  min-height: 280px;
-  max-height: 420px;
+  min-height: 620px;
+  max-height: 720px;
   overflow: hidden;
 }
 
+.log-layout {
+  margin-top: 14px;
+  min-height: 540px;
+  display: grid;
+  grid-template-rows: minmax(320px, 1fr) auto;
+  gap: 16px;
+}
+
 #game-log {
-  margin: 14px 0 0;
+  margin: 0;
   display: flex;
   flex-direction: column;
   gap: 8px;
   color: var(--muted);
-  max-height: 340px;
+  min-height: 320px;
   overflow-y: auto;
+  padding-right: 4px;
 }
 
 #winner-banner {
@@ -488,6 +499,36 @@ select {
 
 .log-entry-text {
   line-height: 1.45;
+}
+
+.history-inline-panel {
+  padding: 16px;
+  border-radius: 22px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.04);
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.history-inline-panel[hidden] {
+  display: none !important;
+}
+
+.history-inline-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.history-inline-header h3 {
+  margin: 0;
+  font-size: 1.3rem;
+}
+
+.history-inline-actions {
+  margin-top: 0;
 }
 
 .card {
@@ -968,15 +1009,15 @@ select {
 
 @media (max-width: 1180px) {
   .player-summary {
-    flex-wrap: wrap;
+    grid-template-columns: auto auto minmax(0, 1fr);
+  }
+
+  .player-heading {
+    grid-column: 1 / -1;
   }
 
   .player-turn-actions-slot {
-    width: 100%;
-  }
-
-  .player-turn-actions {
-    justify-content: flex-start;
+    justify-self: end;
   }
 }
 
@@ -984,6 +1025,20 @@ select {
   .board,
   .board.board-with-side-rail {
     grid-template-columns: 1fr;
+  }
+
+  .player-summary {
+    grid-template-columns: auto auto minmax(0, 1fr);
+  }
+
+  .player-turn-actions-slot {
+    grid-column: 1 / -1;
+    justify-self: stretch;
+    width: 100%;
+  }
+
+  .player-turn-actions {
+    justify-content: flex-start;
   }
 }
 
@@ -999,6 +1054,11 @@ select {
 
   .history-preview-grid {
     grid-template-columns: 1fr;
+  }
+
+  .log-layout {
+    grid-template-rows: minmax(260px, 1fr) auto;
+    min-height: 0;
   }
 
   .player-turn-actions {
