@@ -795,7 +795,16 @@
   function handleShortcutAction(state, shortcutKey, options = {}) {
     const normalizedKey = typeof shortcutKey === "string" ? shortcutKey.toLowerCase() : "";
 
-    if (options.repeat || isInteractiveShortcutTarget(options.target) || isViewingHistory(state)) {
+    if (options.repeat || isInteractiveShortcutTarget(options.target)) {
+      return false;
+    }
+
+    if (normalizedKey === "escape" && isViewingHistory(state)) {
+      state.selectedLogEntryId = null;
+      return true;
+    }
+
+    if (isViewingHistory(state)) {
       return false;
     }
 

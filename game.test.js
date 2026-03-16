@@ -1317,3 +1317,15 @@ test("history view blocks keyboard shortcuts that would mutate the live game", (
   assert(handled === false, "shortcut should be ignored while viewing history");
   assert(state.players[0].hand.length === handSizeBefore, "blocked shortcut should not change the live game");
 });
+
+test("keyboard shortcut escape returns to the present while viewing history", () => {
+  const state = game.createInitialState();
+
+  state.isLogOpen = true;
+  state.selectedLogEntryId = 1;
+
+  const handled = game.handleShortcutAction(state, "Escape");
+
+  assert(handled === true, "escape should be handled while viewing history");
+  assert(state.selectedLogEntryId === null, "escape should leave history view and return to the present");
+});
