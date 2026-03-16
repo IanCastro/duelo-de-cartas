@@ -873,8 +873,11 @@ test("layout markup removes the cancel button and keeps a pending effect slot", 
   assert(!html.includes("id=\"history-modal\""), "history preview should no longer use its own modal");
   assert(!html.includes("class=\"history-floating-panel\""), "history preview should no longer render as a floating panel");
   assert(!html.includes("id=\"history-preview-panel\""), "separate history preview markup should be removed");
-  assert(html.includes("id=\"history-view-banner\""), "history mode should render a top banner");
-  assert(html.includes("id=\"exit-history-view-button\""), "history mode should expose a way back to the present");
+  assert(!html.includes("id=\"history-view-banner\""), "history mode banner should be removed from the markup");
+  assert(!html.includes("id=\"exit-history-view-button\""), "history mode should no longer render a dedicated back button");
+  assert(!html.includes("id=\"rewind-history-button\""), "history mode should no longer render a dedicated rewind button");
+  assert(html.includes("compact-action-button"), "turn action buttons should use the compact button style");
+  assert(html.includes("pressione Esc para voltar ao presente"), "rules should describe how to leave history view without dedicated buttons");
 });
 
 test("estandarte de guerra now costs 5 mana", () => {

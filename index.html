@@ -58,17 +58,6 @@
       </div>
     </section>
 
-    <section class="history-view-banner" id="history-view-banner" aria-hidden="true" hidden>
-      <div class="history-view-copy">
-        <h3 id="history-view-title">Visualizando a acao 1 do log</h3>
-        <p id="history-view-text">Este e um momento passado. A partida atual nao foi alterada.</p>
-      </div>
-      <div class="history-view-actions">
-        <button id="exit-history-view-button" class="action-button secondary" type="button">Voltar ao presente</button>
-        <button id="rewind-history-button" class="action-button" type="button">Voltar para este momento</button>
-      </div>
-    </section>
-
     <section class="board">
       <article class="player-panel" id="player-top-panel">
         <div class="player-summary">
@@ -226,7 +215,7 @@
           <p>A mana aumenta a cada rodada ate 8. O segundo jogador recebe +1 de mana em todos os turnos para compensar a vantagem de comecar.</p>
           <p>Unidades ficam em campo. Suportes permanecem ativos. Efeitos entram em selecao de alvo e vao para o descarte quando resolvidos.</p>
           <p>Cada unidade pode atacar no turno em que entra em campo e depois 1 vez por turno. Se o rival nao tiver unidades em campo, voce pode destruir um suporte com 1 ataque. Reparo Rapido so pode curar alvos feridos.</p>
-          <p>No Log, clique em uma linha para ver aquele momento antigo no tabuleiro em modo somente leitura. Use Voltar ao presente para sair da visualizacao ou Voltar para este momento para restaurar a partida a partir dali.</p>
+          <p>No Log, clique em uma linha para ver aquele momento antigo no tabuleiro em modo somente leitura. Clique novamente na mesma linha para voltar para aquele momento com confirmacao, ou clique na linha mais recente ou pressione Esc para voltar ao presente.</p>
         </section>
 
         <section class="side-panel log-panel" id="log-panel" aria-hidden="true">
@@ -240,8 +229,8 @@
     </section>
 
     <div class="player-turn-actions" id="player-turn-actions-panel" hidden>
-      <button id="draw-button" class="action-button" type="button" title="Comprar carta&#10;Atalho C" aria-keyshortcuts="c">C</button>
-      <button id="end-turn-button" class="action-button secondary" type="button" title="Encerrar turno&#10;Atalho E" aria-keyshortcuts="e">E</button>
+      <button id="draw-button" class="action-button compact-action-button" type="button" title="Comprar carta&#10;Atalho C" aria-keyshortcuts="c">C</button>
+      <button id="end-turn-button" class="action-button secondary compact-action-button" type="button" title="Encerrar turno&#10;Atalho E" aria-keyshortcuts="e">E</button>
     </div>
 
     <div class="modal-backdrop" id="winner-modal" aria-hidden="true">

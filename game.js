@@ -1367,29 +1367,6 @@
     return renderedState;
   }
 
-  function renderHistoryViewBanner(state) {
-    const banner = document.getElementById("history-view-banner");
-    const title = document.getElementById("history-view-title");
-    const text = document.getElementById("history-view-text");
-
-    if (!banner || !title || !text) {
-      return;
-    }
-
-    const selectedEntry = getSelectedLogEntry(state);
-    const isVisible = Boolean(state.isLogOpen && selectedEntry);
-
-    banner.hidden = !isVisible;
-    banner.setAttribute("aria-hidden", String(!isVisible));
-
-    if (!isVisible || !selectedEntry) {
-      return;
-    }
-
-    title.textContent = `Visualizando a acao ${selectedEntry.numero} do log`;
-    text.textContent = `${selectedEntry.texto} Este e um momento passado. A partida atual nao foi alterada.`;
-  }
-
   function render(state) {
     const viewingHistory = isViewingHistory(state);
     const renderedState = getRenderedGameState(state);
@@ -1514,7 +1491,7 @@
       : getAvailableActions(state, state.currentPlayerIndex);
     document.getElementById("turn-indicator").textContent = renderedState.winner ? `${renderedState.winner.nome} venceu` : currentPlayer.nome;
     document.getElementById("turn-status").textContent = viewingHistory
-      ? "Visualizando um momento passado em somente leitura."
+      ? "Visualizando um momento passado em somente leitura. Use Esc ou a linha mais recente do Log para voltar ao presente."
       : state.winner
       ? "A partida terminou. Inicie uma nova partida para jogar novamente."
       : state.selectedEffectCard
@@ -1635,7 +1612,6 @@
     });
 
     renderLibrary(state);
-    renderHistoryViewBanner(state);
 
     document.getElementById("player-bottom-panel").classList.toggle("active", renderedState.currentPlayerIndex === 0 && !renderedState.winner);
     document.getElementById("player-top-panel").classList.toggle("active", renderedState.currentPlayerIndex === 1 && !renderedState.winner);
@@ -1706,22 +1682,6 @@
 
     document.getElementById("close-winner-modal-button").addEventListener("click", () => {
       gameState.isWinnerModalOpen = false;
-      render(gameState);
-    });
-
-    document.getElementById("exit-history-view-button").addEventListener("click", () => {
-      gameState.selectedLogEntryId = null;
-      render(gameState);
-    });
-
-    document.getElementById("rewind-history-button").addEventListener("click", () => {
-      if (gameState.selectedLogEntryId == null) {
-        return;
-      }
-
-      gameState = attemptRewindToLogEntry(gameState, gameState.selectedLogEntryId, {
-        confirmFn: typeof window !== "undefined" ? window.confirm.bind(window) : null
-      });
       render(gameState);
     });
 

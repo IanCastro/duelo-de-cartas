@@ -186,48 +186,6 @@ select {
   display: none;
 }
 
-.history-view-banner {
-  margin-bottom: 20px;
-  padding: 18px;
-  border: 1px solid rgba(244, 184, 96, 0.32);
-  border-radius: 28px;
-  background: linear-gradient(135deg, rgba(244, 184, 96, 0.12), rgba(255, 255, 255, 0.04));
-  box-shadow: var(--shadow);
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 16px;
-}
-
-.history-view-banner[hidden],
-.history-view-banner[aria-hidden="true"] {
-  display: none !important;
-}
-
-.history-view-copy {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  min-width: 0;
-}
-
-.history-view-copy h3 {
-  margin: 0;
-  font-size: 1.35rem;
-}
-
-.history-view-copy p:last-child {
-  margin: 0;
-  color: var(--text);
-}
-
-.history-view-actions {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: flex-end;
-  gap: 10px;
-}
-
 .board.is-history-view .player-panel {
   border-color: rgba(244, 184, 96, 0.24);
 }
@@ -352,12 +310,6 @@ select {
   gap: 10px;
 }
 
-.player-turn-actions .action-button {
-  width: auto;
-  min-width: 134px;
-  padding-inline: 14px;
-}
-
 .player-pending-slot {
   min-height: 0;
 }
@@ -455,6 +407,16 @@ select {
   opacity: 0.45;
   cursor: not-allowed;
   transform: none;
+}
+
+.compact-action-button {
+  width: 48px;
+  min-width: 48px;
+  padding: 12px 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
 }
 
 .deck-stat {
@@ -1055,13 +1017,6 @@ select {
     justify-content: flex-start;
   }
 
-  .history-view-banner {
-    flex-direction: column;
-  }
-
-  .history-view-actions {
-    justify-content: flex-start;
-  }
 }
 
 @media (max-width: 820px) {
@@ -1086,8 +1041,8 @@ select {
     justify-content: stretch;
   }
 
-  .player-turn-actions .action-button {
-    width: 100%;
+  .player-turn-actions .compact-action-button {
+    width: 48px;
   }
 }
 
