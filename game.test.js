@@ -143,6 +143,30 @@ test("player header target mode exposes attack and heal player targets", () => {
   assert(game.getPlayerHeaderTargetMode(healState, 1) === null, "opponent header should not become a heal target");
 });
 
+test("player header resolution uses explicit target clicks", () => {
+  const state = game.createInitialState();
+  state.players[0].manaAtual = 2;
+  state.players[0].manaMax = 2;
+  state.players[0].vida = 34;
+  state.players[0].hand = [{
+    id: "heal",
+    instanceId: "heal",
+    nome: "Reparo",
+    categoria: "efeito",
+    custo: 1,
+    efeito: "cura_direta",
+    valor: 6,
+    descricao: ""
+  }];
+
+  game.playCard(state, 0, "heal");
+  const resolved = game.resolvePlayerHeaderTarget(state, 0);
+
+  assert(resolved === true, "clicking the current player header should resolve healing");
+  assert(state.players[0].vida === 40, "header resolution should heal the current player");
+  assert(state.selectedEffectCard === null, "healing should leave target mode after resolving");
+});
+
 test("keyboard shortcut e ends the turn", () => {
   const state = game.createInitialState();
 
@@ -175,6 +199,30 @@ test("keyboard shortcut escape cancels a prepared effect and refunds mana", () =
   assert(state.selectedEffectCard === null, "escape should clear the selected effect");
   assert(state.players[0].manaAtual === 3, "escape should refund the spent mana");
   assert(state.players[0].hand.length === 1, "escape should return the card to the hand");
+});
+
+test("keyboard shortcut a does not auto-heal when repair is waiting for an explicit target", () => {
+  const state = game.createInitialState();
+  state.players[0].vida = 32;
+  state.players[0].manaAtual = 2;
+  state.players[0].manaMax = 2;
+  state.players[0].hand = [{
+    id: "heal",
+    instanceId: "heal",
+    nome: "Reparo Rapido",
+    categoria: "efeito",
+    custo: 1,
+    efeito: "cura_direta",
+    valor: 6,
+    descricao: ""
+  }];
+
+  game.playCard(state, 0, "heal");
+  const handled = game.handleShortcutAction(state, "a");
+
+  assert(handled === false, "shortcut should not resolve healing automatically");
+  assert(state.players[0].vida === 32, "healing should wait for an explicit target click");
+  assert(state.selectedEffectCard !== null, "repair should remain armed until the player chooses a target");
 });
 
 test("keyboard shortcuts still work when focus is on a button", () => {
@@ -316,6 +364,31 @@ test("newly played unit can attack on the same turn but only once", () => {
   assert(selected === true, "fresh unit should be selectable");
   assert(attacked === true, "fresh unit should attack on the same turn");
   assert(selectedAgain === false, "fresh unit should still respect one attack per turn");
+});
+
+test("selecting the same ready unit twice cancels the attack selection", () => {
+  const state = game.createInitialState();
+  state.players[0].board = [{
+    id: "atk",
+    instanceId: "atk",
+    nome: "Atacante",
+    categoria: "unidade",
+    custo: 1,
+    ataque: 2,
+    vida: 3,
+    vidaBase: 3,
+    descricao: "",
+    estado: "campo",
+    podeAgir: true,
+    jaAtacouNoTurno: false
+  }];
+
+  const firstSelect = game.selectAttacker(state, 0, "atk");
+  const secondSelect = game.selectAttacker(state, 0, "atk");
+
+  assert(firstSelect === true, "first click should arm the attacker");
+  assert(secondSelect === true, "second click should toggle the attacker off");
+  assert(state.selectedAttackerId === null, "second click should clear the attack selection");
 });
 
 test("deck size grows with 4 copies of each card", () => {
@@ -733,16 +806,22 @@ test("canceling prepared direct damage refunds mana and returns the card to hand
   }];
 
   game.playCard(state, 0, "e");
+  const canceled = game.cancelPendingAction(state, 0);
 
   const player = state.players[0];
-  player.hand.push(state.selectedEffectCard);
-  player.manaAtual = Math.min(player.manaAtual + state.selectedEffectCard.custo, player.manaMax);
-  state.selectedEffectCard = null;
-
+  assert(canceled === true, "cancel helper should report the rollback");
   assert(player.manaAtual === 2, "cancel should refund the spent mana");
   assert(player.hand.length === 1, "cancel should return the direct damage card to hand");
   assert(state.selectedEffectCard === null, "cancel should clear selected effect");
   assert(state.log.length === 0, "canceling a prepared effect should not add log noise");
+});
+
+test("layout markup removes the cancel button and keeps a pending effect slot", () => {
+  const html = fs.readFileSync(path.join(process.cwd(), "index.html"), "utf8");
+
+  assert(!html.includes("cancel-attack-button"), "cancel button should be removed from the markup");
+  assert(html.includes("player-1-pending-slot"), "active player area should expose a pending effect slot");
+  assert(html.includes("player-2-pending-slot"), "inactive player area should expose a pending effect slot");
 });
 
 test("estandarte de guerra now costs 4 mana", () => {

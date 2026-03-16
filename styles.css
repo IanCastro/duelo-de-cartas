@@ -195,7 +195,8 @@ select {
 }
 
 .player-summary {
-  align-items: flex-start;
+  align-items: center;
+  flex-wrap: nowrap;
 }
 
 .player-heading {
@@ -203,14 +204,7 @@ select {
   flex-direction: column;
   gap: 4px;
   min-width: 0;
-}
-
-.player-summary-right {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 12px;
-  flex-wrap: wrap;
+  flex: 1 1 auto;
 }
 
 .player-label,
@@ -263,19 +257,14 @@ select {
   text-shadow: 0 0 18px rgba(127, 231, 195, 0.3);
 }
 
-.stat-group {
-  display: flex;
-  gap: 10px;
-  flex-wrap: wrap;
-}
-
 .stat {
-  min-width: 90px;
+  min-width: 96px;
   padding: 10px 12px;
   text-align: center;
   border-radius: 18px;
   background: rgba(255, 255, 255, 0.04);
   border: 1px solid rgba(255, 255, 255, 0.07);
+  flex: 0 0 auto;
 }
 
 .stat strong {
@@ -285,21 +274,34 @@ select {
 }
 
 .player-turn-actions-slot[hidden],
-.player-cancel-slot[hidden],
+.player-pending-slot[hidden],
 #player-turn-actions-panel[hidden] {
   display: none !important;
 }
 
+.player-turn-actions-slot {
+  flex: 0 0 auto;
+}
+
 .player-turn-actions {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   justify-content: flex-end;
   gap: 10px;
 }
 
 .player-turn-actions .action-button {
   width: auto;
-  min-width: 148px;
+  min-width: 134px;
+  padding-inline: 14px;
+}
+
+.player-pending-slot {
+  min-height: 0;
+}
+
+.player-pending-card {
+  max-width: 220px;
 }
 
 .player-grid {
@@ -337,14 +339,16 @@ select {
 }
 
 .zone,
-.typed-hand {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+.typed-hand,
+.player-pending-slot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
   gap: 10px;
 }
 
 .typed-hand {
-  grid-template-columns: 1fr;
+  align-content: flex-start;
 }
 
 #turn-status {
@@ -677,8 +681,11 @@ select {
 }
 
 .zone .card,
-.typed-hand .card {
-  width: 100%;
+.typed-hand .card,
+.player-pending-slot .card {
+  flex: 0 1 168px;
+  width: min(100%, 168px);
+  max-width: 168px;
 }
 
 .typed-hand .card {
@@ -767,8 +774,15 @@ select {
 }
 
 @media (max-width: 1180px) {
-  .player-summary-right {
+  .player-summary {
+    flex-wrap: wrap;
+  }
+
+  .player-turn-actions-slot {
     width: 100%;
+  }
+
+  .player-turn-actions {
     justify-content: flex-start;
   }
 }

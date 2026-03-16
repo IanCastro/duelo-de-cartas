@@ -433,6 +433,11 @@
       return false;
     }
 
+    if (state.selectedAttackerId === unitInstanceId) {
+      state.selectedAttackerId = null;
+      return true;
+    }
+
     state.selectedAttackerId = unitInstanceId;
     return true;
   }
@@ -524,6 +529,28 @@
     return didCancel;
   }
 
+  function resolvePlayerHeaderTarget(state, targetPlayerIndex) {
+    if (state.winner) {
+      return false;
+    }
+
+    const targetMode = getPlayerHeaderTargetMode(state, targetPlayerIndex);
+
+    if (!targetMode) {
+      return false;
+    }
+
+    if (state.selectedEffectCard) {
+      return resolveEffectTarget(state, state.currentPlayerIndex, "player");
+    }
+
+    if (state.selectedAttackerId && targetPlayerIndex !== state.currentPlayerIndex) {
+      return attackTarget(state, state.currentPlayerIndex, "player");
+    }
+
+    return false;
+  }
+
   function getAvailableActions(state, playerIndex = state.currentPlayerIndex) {
     if (state.winner || state.currentPlayerIndex !== playerIndex) {
       return {
@@ -594,7 +621,7 @@
     }
 
     if (normalizedKey === "a") {
-      if (state.selectedEffectCard) {
+      if (state.selectedEffectCard && state.selectedEffectCard.efeito === "dano_direto") {
         return resolveEffectTarget(state, state.currentPlayerIndex, "player");
       }
 
@@ -1062,12 +1089,12 @@
       ? "A partida terminou. Inicie uma nova partida para jogar novamente."
       : state.selectedEffectCard
         ? state.selectedEffectCard.efeito === "cura_direta"
-          ? "Escolha uma unidade aliada ou clique no seu nome para curar o jogador atual."
-          : "Escolha uma unidade inimiga ou clique no nome do rival para causar dano."
+          ? "Escolha uma unidade aliada ou clique no seu nome para curar. Clique novamente na carta armada para cancelar."
+          : "Escolha uma unidade inimiga ou clique no nome do rival para causar dano. Clique novamente na carta armada para cancelar."
         : state.selectedAttackerId
           ? getOpponentPlayer(state).board.length === 0 && getOpponentPlayer(state).supportZone.length > 0
-            ? "Escolha unidade, suporte exposto ou clique no nome do rival para atacar."
-            : "Escolha uma unidade inimiga ou clique no nome do rival para atacar."
+            ? "Escolha unidade, suporte exposto ou clique no nome do rival para atacar. Clique novamente na unidade para cancelar."
+            : "Escolha uma unidade inimiga ou clique no nome do rival para atacar. Clique novamente na unidade para cancelar."
           : "Use sua mana, baixe cartas e ataque com unidades prontas.";
     document.getElementById("deck-count").textContent = `${state.deck.length}/${getTotalDeckSize()}`;
     document.getElementById("discard-count").textContent = String(state.discardPile.length);
@@ -1102,9 +1129,8 @@
     const turnActionsPanel = document.getElementById("player-turn-actions-panel");
     const playerOneTurnActionSlot = document.getElementById("player-1-turn-actions-slot");
     const playerTwoTurnActionSlot = document.getElementById("player-2-turn-actions-slot");
-    const cancelActionsPanel = document.getElementById("player-cancel-actions-panel");
-    const playerOneCancelSlot = document.getElementById("player-1-cancel-slot");
-    const playerTwoCancelSlot = document.getElementById("player-2-cancel-slot");
+    const playerOnePendingSlot = document.getElementById("player-1-pending-slot");
+    const playerTwoPendingSlot = document.getElementById("player-2-pending-slot");
 
     if (turnActionsPanel && playerOneTurnActionSlot && playerTwoTurnActionSlot) {
       const activeTurnSlot = currentPlayer.id === 1 ? playerOneTurnActionSlot : playerTwoTurnActionSlot;
@@ -1119,24 +1145,36 @@
       }
     }
 
-    if (cancelActionsPanel && playerOneCancelSlot && playerTwoCancelSlot) {
-      const activeCancelSlot = currentPlayer.id === 1 ? playerOneCancelSlot : playerTwoCancelSlot;
-      const inactiveCancelSlot = currentPlayer.id === 1 ? playerTwoCancelSlot : playerOneCancelSlot;
+    if (playerOnePendingSlot && playerTwoPendingSlot) {
+      const activePendingSlot = currentPlayer.id === 1 ? playerOnePendingSlot : playerTwoPendingSlot;
+      const inactivePendingSlot = currentPlayer.id === 1 ? playerTwoPendingSlot : playerOnePendingSlot;
 
-      activeCancelSlot.hidden = false;
-      inactiveCancelSlot.hidden = true;
+      inactivePendingSlot.hidden = true;
+      inactivePendingSlot.innerHTML = "";
 
-      if (cancelActionsPanel.parentElement !== activeCancelSlot) {
-        activeCancelSlot.appendChild(cancelActionsPanel);
+      if (state.selectedEffectCard) {
+        activePendingSlot.hidden = false;
+        activePendingSlot.innerHTML = "";
+        activePendingSlot.appendChild(createCardElement(state.selectedEffectCard, {
+          interactive: true,
+          selected: true,
+          className: "pending-effect-card",
+          player: currentPlayer,
+          onClick: () => {
+            cancelPendingAction(state);
+            render(state);
+          }
+        }));
+      } else {
+        activePendingSlot.hidden = true;
+        activePendingSlot.innerHTML = "";
       }
     }
 
     const drawButton = document.getElementById("draw-button");
-    const cancelAttackButton = document.getElementById("cancel-attack-button");
     const endTurnButton = document.getElementById("end-turn-button");
 
     drawButton.disabled = Boolean(state.winner) || Boolean(state.selectedAttackerId) || Boolean(state.selectedEffectCard) || !state.deck.length || !canAfford(currentPlayer, DRAW_COST);
-    cancelAttackButton.disabled = !state.selectedAttackerId && !state.selectedEffectCard;
     endTurnButton.disabled = Boolean(state.winner);
     endTurnButton.classList.toggle("ready-to-end-turn", !state.winner && !availableActions.hasAny);
 
@@ -1178,20 +1216,9 @@
     document.querySelectorAll(".player-name-button").forEach((button) => {
       button.addEventListener("click", () => {
         const targetPlayerIndex = Number(button.dataset.playerIndex);
-        const targetMode = getPlayerHeaderTargetMode(gameState, targetPlayerIndex);
-
-        if (!targetMode) {
-          return;
-        }
-
-        handleShortcutAction(gameState, "a");
+        resolvePlayerHeaderTarget(gameState, targetPlayerIndex);
         render(gameState);
       });
-    });
-
-    document.getElementById("cancel-attack-button").addEventListener("click", () => {
-      cancelPendingAction(gameState);
-      render(gameState);
     });
 
     document.getElementById("end-turn-button").addEventListener("click", () => {
@@ -1260,6 +1287,7 @@
       getCardOverlayData,
       getDeckCardCounts,
       getPlayerHeaderTargetMode,
+      resolvePlayerHeaderTarget,
       groupHandByCategory,
       getTotalDeckSize,
       isAnySidePanelOpen,

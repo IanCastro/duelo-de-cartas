@@ -69,22 +69,18 @@
             <p class="player-label">Jogador 2</p>
             <button id="player-2-name" class="player-name-button" type="button" data-player-index="1">Guardiao Rubro</button>
           </div>
-          <div class="player-summary-right">
-            <div class="stat-group">
-              <div class="stat">
-                <span class="stat-label">Vida</span>
-                <strong id="player-2-health">40</strong>
-              </div>
-              <div class="stat">
-                <span class="stat-label">Mana</span>
-                <strong id="player-2-mana">0/0</strong>
-              </div>
-            </div>
-            <div class="player-turn-actions-slot" id="player-2-turn-actions-slot" hidden></div>
+          <div class="stat">
+            <span class="stat-label">Vida</span>
+            <strong id="player-2-health">40</strong>
           </div>
+          <div class="stat">
+            <span class="stat-label">Mana</span>
+            <strong id="player-2-mana">0/0</strong>
+          </div>
+          <div class="player-turn-actions-slot" id="player-2-turn-actions-slot" hidden></div>
         </div>
 
-        <div class="player-cancel-slot" id="player-2-cancel-slot" hidden></div>
+        <div class="player-pending-slot" id="player-2-pending-slot" hidden></div>
 
         <div class="player-grid">
           <section class="player-section">
@@ -141,26 +137,18 @@
             <p class="player-label">Jogador 1</p>
             <button id="player-1-name" class="player-name-button" type="button" data-player-index="0">Sentinela Azul</button>
           </div>
-          <div class="player-summary-right">
-            <div class="stat-group">
-              <div class="stat">
-                <span class="stat-label">Vida</span>
-                <strong id="player-1-health">40</strong>
-              </div>
-              <div class="stat">
-                <span class="stat-label">Mana</span>
-                <strong id="player-1-mana">0/0</strong>
-              </div>
-            </div>
-            <div class="player-turn-actions-slot" id="player-1-turn-actions-slot"></div>
+          <div class="stat">
+            <span class="stat-label">Vida</span>
+            <strong id="player-1-health">40</strong>
           </div>
+          <div class="stat">
+            <span class="stat-label">Mana</span>
+            <strong id="player-1-mana">0/0</strong>
+          </div>
+          <div class="player-turn-actions-slot" id="player-1-turn-actions-slot"></div>
         </div>
 
-        <div class="player-cancel-slot" id="player-1-cancel-slot">
-          <div class="action-panel player-cancel-actions" id="player-cancel-actions-panel">
-            <button id="cancel-attack-button" class="action-button ghost" type="button" title="Atalho: Esc" aria-keyshortcuts="Escape">Cancelar ataque</button>
-          </div>
-        </div>
+        <div class="player-pending-slot" id="player-1-pending-slot" hidden></div>
 
         <div class="player-grid">
           <section class="player-section">
