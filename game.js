@@ -996,7 +996,7 @@
   }
 
   function groupHandByCategory(cards) {
-    return cards.reduce((groups, card) => {
+    const groups = cards.reduce((groups, card) => {
       if (!groups[card.categoria]) {
         groups[card.categoria] = [];
       }
@@ -1008,6 +1008,28 @@
       suporte: [],
       efeito: []
     });
+
+    groups.unidade.sort((left, right) => {
+      const costDifference = (left.custo || 0) - (right.custo || 0);
+
+      if (costDifference !== 0) {
+        return costDifference;
+      }
+
+      const leftName = String(left.nome || "");
+      const rightName = String(right.nome || "");
+      if (leftName < rightName) {
+        return -1;
+      }
+
+      if (leftName > rightName) {
+        return 1;
+      }
+
+      return 0;
+    });
+
+    return groups;
   }
 
   function isAnySidePanelOpen(state) {

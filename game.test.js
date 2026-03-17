@@ -434,15 +434,18 @@ test("deck card counts report how many copies remain in the baralho", () => {
 test("group hand by category keeps cards in their correct columns", () => {
   const grouped = game.groupHandByCategory([
     { categoria: "efeito", nome: "Raio" },
-    { categoria: "unidade", nome: "Escudeiro" },
+    { categoria: "unidade", nome: "Berserker", custo: 5 },
     { categoria: "suporte", nome: "Estandarte" },
-    { categoria: "unidade", nome: "Arqueira" }
+    { categoria: "unidade", nome: "Escudeiro", custo: 2 },
+    { categoria: "unidade", nome: "Guardiao", custo: 4 }
   ]);
 
-  assert(grouped.unidade.length === 2, "unit cards should be grouped together");
+  assert(grouped.unidade.length === 3, "unit cards should be grouped together");
   assert(grouped.suporte.length === 1, "support cards should be grouped together");
   assert(grouped.efeito.length === 1, "effect cards should be grouped together");
-  assert(grouped.unidade[0].nome === "Escudeiro", "grouping should preserve original order inside a category");
+  assert(grouped.unidade[0].nome === "Escudeiro", "units should be ordered from lowest to highest cost");
+  assert(grouped.unidade[1].nome === "Guardiao", "units with middle costs should stay in the middle");
+  assert(grouped.unidade[2].nome === "Berserker", "higher cost units should appear last in the hand column");
 });
 
 test("side rail helper reports when any optional panel is open", () => {
