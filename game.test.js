@@ -27,7 +27,7 @@ test("initial state sets health, hands, and starting mana", () => {
   assert(state.players[0].hand.length === 4, "player 1 should draw 4 starting cards");
   assert(state.players[1].hand.length === 4, "player 2 should draw 4 starting cards");
   assert(state.players[0].manaAtual === 1 && state.players[0].manaMax === 1, "first player should start with 1 mana");
-  assert(state.players[1].manaAtual === 0 && state.players[1].manaMax === 0, "second player should wait for its turn to gain mana");
+  assert(state.players[1].manaAtual === 0 && state.players[1].manaMax === 1, "second player should open the match showing 0/1 mana");
   assert(Array.isArray(state.log), "game should keep a log array");
   assert(state.log.length === 1, "log should start with the initial setup entry");
   assert(state.log[0].numero === 1, "first log line should start at action 1");

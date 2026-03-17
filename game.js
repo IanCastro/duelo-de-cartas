@@ -161,6 +161,7 @@
     }
 
     startTurn(state, 0, false);
+    state.players[1].manaMax = 1;
     addLog(state, buildInitialLogMessage(state));
     return state;
   }
