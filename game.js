@@ -4,6 +4,15 @@
   const MAX_MANA = 8;
   const DRAW_COST = 1;
   const CARD_COPIES_PER_TYPE = 4;
+  const AI_PLAYER_INDEX = 1;
+  const AI_STEP_DELAY_MS = 500;
+  const GAME_MODES = Object.freeze({
+    HUMAN_VS_AI: "human-vs-ai",
+    HUMAN_VS_HUMAN: "human-vs-human"
+  });
+
+  let sessionGameMode = GAME_MODES.HUMAN_VS_AI;
+  let aiTurnTimerId = null;
 
   const CARD_LIBRARY = [
     {
@@ -119,6 +128,19 @@
     return deck;
   }
 
+  function normalizeGameMode(mode) {
+    return mode === GAME_MODES.HUMAN_VS_HUMAN ? mode : GAME_MODES.HUMAN_VS_AI;
+  }
+
+  function getSessionGameMode() {
+    return sessionGameMode;
+  }
+
+  function setSessionGameMode(mode) {
+    sessionGameMode = normalizeGameMode(mode);
+    return sessionGameMode;
+  }
+
   function createPlayer(id, nome) {
     return {
       id,
@@ -137,6 +159,9 @@
       deck: shuffleDeck(createDeck()),
       discardPile: [],
       currentPlayerIndex: 0,
+      gameMode: getSessionGameMode(),
+      isAiTurnInProgress: false,
+      aiStepText: null,
       isLibraryOpen: false,
       isRulesOpen: false,
       isLogOpen: false,
@@ -196,6 +221,9 @@
       deck: cloneData(state.deck),
       discardPile: cloneData(state.discardPile),
       currentPlayerIndex: state.currentPlayerIndex,
+      gameMode: state.gameMode,
+      isAiTurnInProgress: state.isAiTurnInProgress,
+      aiStepText: state.aiStepText,
       isLibraryOpen: state.isLibraryOpen,
       isRulesOpen: state.isRulesOpen,
       isLogOpen: state.isLogOpen,
@@ -234,6 +262,9 @@
       deck: cloneData(snapshot.deck),
       discardPile: cloneData(snapshot.discardPile),
       currentPlayerIndex: snapshot.currentPlayerIndex,
+      gameMode: normalizeGameMode(snapshot.gameMode),
+      isAiTurnInProgress: Boolean(snapshot.isAiTurnInProgress),
+      aiStepText: snapshot.aiStepText || null,
       isLibraryOpen: snapshot.isLibraryOpen,
       isRulesOpen: snapshot.isRulesOpen,
       isLogOpen: snapshot.isLogOpen,
@@ -308,6 +339,380 @@
 
   function getOpponentPlayer(state) {
     return state.players[(state.currentPlayerIndex + 1) % 2];
+  }
+
+  function compareText(left, right) {
+    const leftText = String(left || "");
+    const rightText = String(right || "");
+    if (leftText < rightText) {
+      return -1;
+    }
+
+    if (leftText > rightText) {
+      return 1;
+    }
+
+    return 0;
+  }
+
+  function isAiEnabled(state) {
+    return Boolean(state && state.gameMode && normalizeGameMode(state.gameMode) === GAME_MODES.HUMAN_VS_AI);
+  }
+
+  function isAiControlledPlayer(state, playerIndex) {
+    return isAiEnabled(state) && playerIndex === AI_PLAYER_INDEX;
+  }
+
+  function isAiTurnActive(state) {
+    return Boolean(state && !state.winner && isAiControlledPlayer(state, state.currentPlayerIndex));
+  }
+
+  function shouldRunAi(state) {
+    return isAiTurnActive(state) && !isViewingHistory(state);
+  }
+
+  function cancelAiTurn(state = null) {
+    if (aiTurnTimerId !== null) {
+      clearTimeout(aiTurnTimerId);
+      aiTurnTimerId = null;
+    }
+
+    if (!state) {
+      return;
+    }
+
+    state.isAiTurnInProgress = false;
+    if (!isAiTurnActive(state)) {
+      state.aiStepText = null;
+    }
+  }
+
+  function getAiPlayableCards(state) {
+    const playerIndex = state.currentPlayerIndex;
+    const player = state.players[playerIndex];
+    return player.hand.filter((card) => canPlayCard(state, playerIndex, card));
+  }
+
+  function getAiReadyAttackers(state) {
+    return getAvailableAttackers(getCurrentPlayer(state));
+  }
+
+  function compareCardsByCostAsc(left, right) {
+    return ((left.custo || 0) - (right.custo || 0))
+      || compareText(left.nome, right.nome);
+  }
+
+  function compareUnitsByThreatDesc(left, right) {
+    return (right.ataque - left.ataque)
+      || ((right.vidaBase || right.vida || 0) - (left.vidaBase || left.vida || 0))
+      || ((right.custo || 0) - (left.custo || 0))
+      || compareText(left.nome, right.nome);
+  }
+
+  function compareUnitsForAiPlay(left, right) {
+    return ((right.vidaBase || right.vida || 0) - (left.vidaBase || left.vida || 0))
+      || (right.ataque - left.ataque)
+      || ((left.custo || 0) - (right.custo || 0))
+      || compareText(left.nome, right.nome);
+  }
+
+  function compareAttackersByPowerDesc(player) {
+    return (left, right) => (getUnitAttack(right, player) - getUnitAttack(left, player))
+      || ((right.vida || right.vidaBase || 0) - (left.vida || left.vidaBase || 0))
+      || compareText(left.nome, right.nome);
+  }
+
+  function compareAttackersByPowerAsc(player) {
+    return (left, right) => (getUnitAttack(left, player) - getUnitAttack(right, player))
+      || ((left.vida || left.vidaBase || 0) - (right.vida || right.vidaBase || 0))
+      || compareText(left.nome, right.nome);
+  }
+
+  function compareHealableUnits(left, right) {
+    return ((right.vidaBase - right.vida) - (left.vidaBase - left.vida))
+      || (right.ataque - left.ataque)
+      || compareText(left.nome, right.nome);
+  }
+
+  function getAiSupportPriority(card) {
+    if (card.efeito === "aura_ataque") {
+      return 0;
+    }
+
+    if (card.efeito === "cura_fim_turno") {
+      return 1;
+    }
+
+    return 2;
+  }
+
+  function compareSupportsForAiTarget(left, right) {
+    return (getAiSupportPriority(left) - getAiSupportPriority(right))
+      || compareText(left.nome, right.nome);
+  }
+
+  function getNextAiAction(state) {
+    if (!shouldRunAi(state)) {
+      return null;
+    }
+
+    const player = getCurrentPlayer(state);
+    const opponent = getOpponentPlayer(state);
+    const playableCards = getAiPlayableCards(state);
+    const readyAttackers = getAiReadyAttackers(state);
+    const damageCards = playableCards
+      .filter((card) => card.efeito === "dano_direto")
+      .sort(compareCardsByCostAsc);
+    const healingCards = playableCards
+      .filter((card) => card.efeito === "cura_direta")
+      .sort(compareCardsByCostAsc);
+    const supportCards = playableCards
+      .filter((card) => card.categoria === "suporte")
+      .sort(compareCardsByCostAsc);
+    const unitCards = playableCards
+      .filter((card) => card.categoria === "unidade")
+      .sort(compareUnitsForAiPlay);
+
+    const lethalAttacker = [...readyAttackers]
+      .sort(compareAttackersByPowerAsc(player))
+      .find((attacker) => getUnitAttack(attacker, player) >= opponent.vida);
+    if (lethalAttacker) {
+      return {
+        type: "attack-player",
+        attackerInstanceId: lethalAttacker.instanceId,
+        text: `IA atacou ${opponent.nome} com ${lethalAttacker.nome}.`
+      };
+    }
+
+    const lethalDamageCard = damageCards.find((card) => card.valor >= opponent.vida);
+    if (lethalDamageCard) {
+      return {
+        type: "effect-player",
+        cardInstanceId: lethalDamageCard.instanceId,
+        text: `IA usou ${lethalDamageCard.nome} em ${opponent.nome}.`
+      };
+    }
+
+    for (const card of damageCards) {
+      const killTargets = opponent.board
+        .filter((unit) => unit.vida <= card.valor)
+        .sort(compareUnitsByThreatDesc);
+
+      if (killTargets[0]) {
+        return {
+          type: "effect-unit",
+          cardInstanceId: card.instanceId,
+          targetInstanceId: killTargets[0].instanceId,
+          text: `IA usou ${card.nome} em ${killTargets[0].nome}.`
+        };
+      }
+    }
+
+    const healingCard = healingCards[0] || null;
+    const healableUnits = getHealableUnits(player).sort(compareHealableUnits);
+    if (healingCard && healableUnits[0]) {
+      return {
+        type: "effect-ally-unit",
+        cardInstanceId: healingCard.instanceId,
+        targetInstanceId: healableUnits[0].instanceId,
+        text: `IA usou ${healingCard.nome} em ${healableUnits[0].nome}.`
+      };
+    }
+
+    if (healingCard && canPlayerReceiveHealing(player) && (MAX_HEALTH - player.vida) >= 4) {
+      return {
+        type: "effect-player",
+        cardInstanceId: healingCard.instanceId,
+        text: `IA usou ${healingCard.nome} em si mesma.`
+      };
+    }
+
+    const bannerSupport = supportCards.find((card) => card.efeito === "aura_ataque" && player.board.length > 0);
+    if (bannerSupport) {
+      return {
+        type: "play-card",
+        cardInstanceId: bannerSupport.instanceId,
+        text: `IA ativou ${bannerSupport.nome}.`
+      };
+    }
+
+    const healingSupport = supportCards.find((card) => card.efeito === "cura_fim_turno" && canPlayerReceiveHealing(player));
+    if (healingSupport) {
+      return {
+        type: "play-card",
+        cardInstanceId: healingSupport.instanceId,
+        text: `IA ativou ${healingSupport.nome}.`
+      };
+    }
+
+    if (unitCards[0]) {
+      return {
+        type: "play-card",
+        cardInstanceId: unitCards[0].instanceId,
+        text: `IA baixou ${unitCards[0].nome}.`
+      };
+    }
+
+    const killableTargets = opponent.board
+      .filter((target) => readyAttackers.some((attacker) => getUnitAttack(attacker, player) >= target.vida))
+      .sort(compareUnitsByThreatDesc);
+    if (killableTargets[0]) {
+      const chosenTarget = killableTargets[0];
+      const attacker = [...readyAttackers]
+        .filter((unit) => getUnitAttack(unit, player) >= chosenTarget.vida)
+        .sort(compareAttackersByPowerAsc(player))[0];
+
+      if (attacker) {
+        return {
+          type: "attack-unit",
+          attackerInstanceId: attacker.instanceId,
+          targetInstanceId: chosenTarget.instanceId,
+          text: `IA atacou ${chosenTarget.nome} com ${attacker.nome}.`
+        };
+      }
+    }
+
+    if (opponent.board.length > 0 && readyAttackers[0]) {
+      const chosenTarget = [...opponent.board].sort(compareUnitsByThreatDesc)[0];
+      const attacker = [...readyAttackers].sort(compareAttackersByPowerDesc(player))[0];
+
+      return {
+        type: "attack-unit",
+        attackerInstanceId: attacker.instanceId,
+        targetInstanceId: chosenTarget.instanceId,
+        text: `IA atacou ${chosenTarget.nome} com ${attacker.nome}.`
+      };
+    }
+
+    if (opponent.supportZone.length > 0 && readyAttackers[0]) {
+      const chosenSupport = [...opponent.supportZone].sort(compareSupportsForAiTarget)[0];
+      const attacker = [...readyAttackers].sort(compareAttackersByPowerAsc(player))[0];
+
+      return {
+        type: "attack-support",
+        attackerInstanceId: attacker.instanceId,
+        targetInstanceId: chosenSupport.instanceId,
+        text: `IA destruiu ${chosenSupport.nome} com ${attacker.nome}.`
+      };
+    }
+
+    if (readyAttackers[0]) {
+      const attacker = [...readyAttackers].sort(compareAttackersByPowerDesc(player))[0];
+      return {
+        type: "attack-player",
+        attackerInstanceId: attacker.instanceId,
+        text: `IA atacou ${opponent.nome} com ${attacker.nome}.`
+      };
+    }
+
+    if (state.deck.length > 0 && canAfford(player, DRAW_COST)) {
+      return {
+        type: "draw-card",
+        text: "IA comprou uma carta."
+      };
+    }
+
+    return {
+      type: "end-turn",
+      text: "IA encerrou o turno."
+    };
+  }
+
+  function performAiStep(state) {
+    const action = getNextAiAction(state);
+
+    if (!action) {
+      return null;
+    }
+
+    const playerIndex = state.currentPlayerIndex;
+    let didAct = false;
+
+    if (action.type === "play-card") {
+      didAct = playCard(state, playerIndex, action.cardInstanceId);
+    }
+
+    if (action.type === "draw-card") {
+      didAct = Boolean(drawTurnCard(state, playerIndex));
+    }
+
+    if (action.type === "effect-player") {
+      didAct = playCard(state, playerIndex, action.cardInstanceId)
+        && resolveEffectTarget(state, playerIndex, "player");
+    }
+
+    if (action.type === "effect-unit") {
+      didAct = playCard(state, playerIndex, action.cardInstanceId)
+        && resolveEffectTarget(state, playerIndex, "unit", action.targetInstanceId);
+    }
+
+    if (action.type === "effect-ally-unit") {
+      didAct = playCard(state, playerIndex, action.cardInstanceId)
+        && resolveEffectTarget(state, playerIndex, "ally-unit", action.targetInstanceId);
+    }
+
+    if (action.type === "attack-player") {
+      didAct = selectAttacker(state, playerIndex, action.attackerInstanceId)
+        && attackTarget(state, playerIndex, "player");
+    }
+
+    if (action.type === "attack-unit") {
+      didAct = selectAttacker(state, playerIndex, action.attackerInstanceId)
+        && attackTarget(state, playerIndex, "unit", action.targetInstanceId);
+    }
+
+    if (action.type === "attack-support") {
+      didAct = selectAttacker(state, playerIndex, action.attackerInstanceId)
+        && attackTarget(state, playerIndex, "support", action.targetInstanceId);
+    }
+
+    if (action.type === "end-turn") {
+      endTurn(state);
+      didAct = true;
+    }
+
+    if (!didAct) {
+      return null;
+    }
+
+    state.aiStepText = action.text;
+    state.isAiTurnInProgress = isAiTurnActive(state);
+    if (!isAiTurnActive(state)) {
+      state.aiStepText = null;
+    }
+
+    return action;
+  }
+
+  function scheduleAiTurn(state) {
+    if (!shouldRunAi(state)) {
+      cancelAiTurn(state);
+      return false;
+    }
+
+    if (aiTurnTimerId !== null) {
+      return true;
+    }
+
+    state.isAiTurnInProgress = true;
+    if (!state.aiStepText) {
+      state.aiStepText = "IA avaliando o campo.";
+    }
+
+    aiTurnTimerId = setTimeout(() => {
+      aiTurnTimerId = null;
+
+      if (!shouldRunAi(gameState)) {
+        cancelAiTurn(gameState);
+        render(gameState);
+        return;
+      }
+
+      performAiStep(gameState);
+      render(gameState);
+    }, AI_STEP_DELAY_MS);
+
+    return true;
   }
 
   function getSupportBonus(player, effect) {
@@ -714,7 +1119,7 @@
   }
 
   function resolvePlayerHeaderTarget(state, targetPlayerIndex) {
-    if (state.winner) {
+    if (state.winner || isAiTurnActive(state)) {
       return false;
     }
 
@@ -806,6 +1211,10 @@
     }
 
     if (isViewingHistory(state)) {
+      return false;
+    }
+
+    if (isAiTurnActive(state)) {
       return false;
     }
 
@@ -1377,6 +1786,9 @@
       deck: cloneData(snapshot.deck),
       discardPile: cloneData(snapshot.discardPile),
       currentPlayerIndex: snapshot.currentPlayerIndex,
+      gameMode: normalizeGameMode(snapshot.gameMode),
+      isAiTurnInProgress: Boolean(snapshot.isAiTurnInProgress),
+      aiStepText: snapshot.aiStepText || null,
       selectedAttackerId: snapshot.selectedAttackerId,
       selectedEffectCard: cloneData(snapshot.selectedEffectCard),
       turnNumber: snapshot.turnNumber,
@@ -1392,8 +1804,10 @@
 
   function render(state) {
     const viewingHistory = isViewingHistory(state);
+    const aiTurnActive = isAiTurnActive(state);
     const renderedState = getRenderedGameState(state);
     const currentPlayer = getCurrentPlayer(renderedState);
+    const renderedCurrentPlayerIsAi = isAiControlledPlayer(renderedState, renderedState.currentPlayerIndex);
 
     renderedState.players.forEach((player, index) => {
       const groupedHand = groupHandByCategory(player.hand);
@@ -1404,7 +1818,7 @@
       document.getElementById(`player-${player.id}-mana`).textContent = `${player.manaAtual}/${player.manaMax}`;
       const playerNameButton = document.getElementById(`player-${player.id}-name`);
       const playerTargetHint = document.getElementById(`player-${player.id}-target-hint`);
-      const headerTargetMode = viewingHistory ? null : getPlayerHeaderTargetMode(state, index);
+      const headerTargetMode = (viewingHistory || aiTurnActive) ? null : getPlayerHeaderTargetMode(state, index);
 
       if (playerNameButton) {
         playerNameButton.textContent = player.nome;
@@ -1428,7 +1842,7 @@
           `player-${player.id}-hand-${category}`,
           groupedHand[category],
           (card) => createCardElement(card, {
-            interactive: !viewingHistory && canPlayCard(state, index, card),
+            interactive: !viewingHistory && !aiTurnActive && canPlayCard(state, index, card),
             className: player.id === 2 ? "opponent-card" : "",
             player,
             onClick: () => {
@@ -1449,11 +1863,11 @@
         player.board,
         (card) => {
           const isCurrentPlayer = index === renderedState.currentPlayerIndex;
-          const isSelected = !viewingHistory && card.instanceId === state.selectedAttackerId;
-          const canSelect = !viewingHistory && isCurrentPlayer && !state.winner && card.podeAgir && !card.jaAtacouNoTurno && !state.selectedEffectCard;
-          const canBeCombatTargeted = !viewingHistory && !isCurrentPlayer && Boolean(state.selectedAttackerId) && !state.winner;
-          const canBeDamageEffectTargeted = !viewingHistory && !isCurrentPlayer && Boolean(state.selectedEffectCard) && state.selectedEffectCard.efeito === "dano_direto" && !state.winner;
-          const canBeHealingEffectTargeted = !viewingHistory && isCurrentPlayer
+          const isSelected = !viewingHistory && !aiTurnActive && card.instanceId === state.selectedAttackerId;
+          const canSelect = !viewingHistory && !aiTurnActive && isCurrentPlayer && !state.winner && card.podeAgir && !card.jaAtacouNoTurno && !state.selectedEffectCard;
+          const canBeCombatTargeted = !viewingHistory && !aiTurnActive && !isCurrentPlayer && Boolean(state.selectedAttackerId) && !state.winner;
+          const canBeDamageEffectTargeted = !viewingHistory && !aiTurnActive && !isCurrentPlayer && Boolean(state.selectedEffectCard) && state.selectedEffectCard.efeito === "dano_direto" && !state.winner;
+          const canBeHealingEffectTargeted = !viewingHistory && !aiTurnActive && isCurrentPlayer
             && Boolean(state.selectedEffectCard)
             && state.selectedEffectCard.efeito === "cura_direta"
             && !state.winner
@@ -1487,6 +1901,7 @@
         (card) => {
           const isCurrentPlayer = index === renderedState.currentPlayerIndex;
           const canBeSupportTargeted = !viewingHistory
+            && !aiTurnActive
             && !isCurrentPlayer
             && Boolean(state.selectedAttackerId)
             && !state.selectedEffectCard
@@ -1512,11 +1927,17 @@
     const availableActions = viewingHistory
       ? { hasAny: false }
       : getAvailableActions(state, state.currentPlayerIndex);
-    document.getElementById("turn-indicator").textContent = renderedState.winner ? `${renderedState.winner.nome} venceu` : currentPlayer.nome;
+    document.getElementById("turn-indicator").textContent = renderedState.winner
+      ? `${renderedState.winner.nome} venceu`
+      : renderedCurrentPlayerIsAi
+        ? `${currentPlayer.nome} (IA)`
+        : currentPlayer.nome;
     document.getElementById("turn-status").textContent = viewingHistory
       ? "Visualizando um momento passado em somente leitura. Use Esc ou a linha mais recente do Log para voltar ao presente."
       : state.winner
       ? "A partida terminou. Inicie uma nova partida para jogar novamente."
+      : aiTurnActive
+      ? (state.aiStepText || "IA avaliando o campo.")
       : state.selectedEffectCard
         ? state.selectedEffectCard.efeito === "cura_direta"
           ? "Escolha uma unidade aliada ferida ou clique no seu nome para curar o jogador. Clique novamente na carta armada para cancelar."
@@ -1539,11 +1960,13 @@
     const toggleLibraryButton = document.getElementById("toggle-library-button");
     const toggleRulesButton = document.getElementById("toggle-rules-button");
     const toggleLogButton = document.getElementById("toggle-log-button");
+    const gameModeSelect = document.getElementById("game-mode-select");
     const anySidePanelOpen = isAnySidePanelOpen(state);
 
     if (boardElement && sideRail && libraryPanel && rulesPanel && logPanel && toggleLibraryButton && toggleRulesButton && toggleLogButton) {
       boardElement.classList.toggle("board-with-side-rail", anySidePanelOpen);
       boardElement.classList.toggle("is-history-view", viewingHistory);
+      boardElement.classList.toggle("is-ai-turn", aiTurnActive);
       sideRail.setAttribute("aria-hidden", String(!anySidePanelOpen));
       libraryPanel.setAttribute("aria-hidden", String(!state.isLibraryOpen));
       rulesPanel.setAttribute("aria-hidden", String(!state.isRulesOpen));
@@ -1554,6 +1977,10 @@
       toggleLibraryButton.setAttribute("aria-expanded", String(state.isLibraryOpen));
       toggleRulesButton.setAttribute("aria-expanded", String(state.isRulesOpen));
       toggleLogButton.setAttribute("aria-expanded", String(state.isLogOpen));
+    }
+
+    if (gameModeSelect) {
+      gameModeSelect.value = getSessionGameMode();
     }
 
     const turnActionsPanel = document.getElementById("player-turn-actions-panel");
@@ -1607,9 +2034,9 @@
     const drawButton = document.getElementById("draw-button");
     const endTurnButton = document.getElementById("end-turn-button");
 
-    drawButton.disabled = viewingHistory || Boolean(state.winner) || Boolean(state.selectedAttackerId) || Boolean(state.selectedEffectCard) || !state.deck.length || !canAfford(getCurrentPlayer(state), DRAW_COST);
-    endTurnButton.disabled = viewingHistory || Boolean(state.winner);
-    endTurnButton.classList.toggle("ready-to-end-turn", !viewingHistory && !state.winner && !availableActions.hasAny);
+    drawButton.disabled = viewingHistory || aiTurnActive || Boolean(state.winner) || Boolean(state.selectedAttackerId) || Boolean(state.selectedEffectCard) || !state.deck.length || !canAfford(getCurrentPlayer(state), DRAW_COST);
+    endTurnButton.disabled = viewingHistory || aiTurnActive || Boolean(state.winner);
+    endTurnButton.classList.toggle("ready-to-end-turn", !viewingHistory && !aiTurnActive && !state.winner && !availableActions.hasAny);
 
     const logElement = document.getElementById("game-log");
     logElement.innerHTML = "";
@@ -1650,6 +2077,12 @@
         winnerModalText.textContent = `${state.winner.nome} reduziu a vida rival a zero e venceu a partida.`;
       }
     }
+
+    if (shouldRunAi(state)) {
+      scheduleAiTurn(state);
+    } else {
+      cancelAiTurn(state);
+    }
   }
 
   function bindUI() {
@@ -1670,6 +2103,12 @@
       if (!gameState.isLogOpen) {
         gameState.selectedLogEntryId = null;
       }
+      render(gameState);
+    });
+
+    document.getElementById("game-mode-select").addEventListener("change", (event) => {
+      setSessionGameMode(event.target.value);
+      event.target.value = getSessionGameMode();
       render(gameState);
     });
 
@@ -1694,11 +2133,13 @@
     });
 
     document.getElementById("restart-button").addEventListener("click", () => {
+      cancelAiTurn(gameState);
       gameState = createRestartState(gameState);
       render(gameState);
     });
 
     document.getElementById("winner-restart-button").addEventListener("click", () => {
+      cancelAiTurn(gameState);
       gameState = createRestartState(gameState);
       render(gameState);
     });
@@ -1744,7 +2185,11 @@
       MAX_MANA,
       DRAW_COST,
       CARD_COPIES_PER_TYPE,
+      AI_STEP_DELAY_MS,
+      GAME_MODES,
       CARD_LIBRARY,
+      getSessionGameMode,
+      setSessionGameMode,
       createDeck,
       shuffleDeck,
       createInitialState,
@@ -1769,6 +2214,8 @@
       getPlayerHeaderTargetMode,
       resolvePlayerHeaderTarget,
       toggleExclusiveSidePanel,
+      isAiEnabled,
+      isAiControlledPlayer,
       createStateSnapshot,
       restoreStateFromSnapshot,
       rewindToLogEntry,
@@ -1784,6 +2231,8 @@
       attemptEndTurn,
       cancelPendingAction,
       handleShortcutAction,
+      getNextAiAction,
+      performAiStep,
       getUnitAttack,
       getAvailableAttackers
     };

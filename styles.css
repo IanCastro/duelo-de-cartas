@@ -55,6 +55,37 @@ select {
   gap: 10px;
 }
 
+.game-mode-picker {
+  padding: 10px 14px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.07);
+  color: var(--text);
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.game-mode-picker span {
+  font-size: 0.78rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.game-mode-picker select {
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+  min-width: 148px;
+  outline: none;
+}
+
+.game-mode-picker select option {
+  color: #091114;
+}
+
 .eyebrow {
   margin: 0 0 8px;
   font-size: 0.8rem;
@@ -192,6 +223,15 @@ select {
 
 .board.is-history-view .player-turn-actions,
 .board.is-history-view .player-pending-slot {
+  opacity: 0.72;
+}
+
+.board.is-ai-turn .player-panel.active {
+  border-color: rgba(122, 184, 255, 0.4);
+  background: rgba(18, 37, 45, 0.95);
+}
+
+.board.is-ai-turn .player-turn-actions {
   opacity: 0.72;
 }
 
@@ -1049,6 +1089,16 @@ select {
 @media (max-width: 640px) {
   .hero {
     align-items: flex-start;
+  }
+
+  .game-mode-picker {
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  .game-mode-picker select {
+    min-width: 0;
+    flex: 1 1 auto;
   }
 
   .hero-toggles {

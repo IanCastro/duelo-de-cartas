@@ -22,6 +22,7 @@ function test(name, callback) {
 test("initial state sets health, hands, and starting mana", () => {
   const state = game.createInitialState();
 
+  assert(state.gameMode === game.GAME_MODES.HUMAN_VS_AI, "new sessions should default to Humano vs IA");
   assert(state.players[0].vida === 40, "player 1 should start at max health");
   assert(state.players[1].vida === 40, "player 2 should start at max health");
   assert(state.players[0].hand.length === 4, "player 1 should draw 4 starting cards");
@@ -32,6 +33,38 @@ test("initial state sets health, hands, and starting mana", () => {
   assert(state.log.length === 1, "log should start with the initial setup entry");
   assert(state.log[0].numero === 1, "first log line should start at action 1");
   assert(state.log[0].texto.includes("Partida iniciada"), "first log line should describe the start of the match");
+});
+
+test("session game mode controls how new matches start", () => {
+  const previousMode = game.getSessionGameMode();
+
+  try {
+    game.setSessionGameMode(game.GAME_MODES.HUMAN_VS_HUMAN);
+    const humanMatch = game.createInitialState();
+    assert(humanMatch.gameMode === game.GAME_MODES.HUMAN_VS_HUMAN, "new matches should use the session mode selection");
+
+    game.setSessionGameMode(game.GAME_MODES.HUMAN_VS_AI);
+    const aiMatch = game.createInitialState();
+    assert(aiMatch.gameMode === game.GAME_MODES.HUMAN_VS_AI, "changing the session mode should affect the next new match");
+  } finally {
+    game.setSessionGameMode(previousMode);
+  }
+});
+
+test("restart uses the current session mode for the next game", () => {
+  const previousMode = game.getSessionGameMode();
+
+  try {
+    game.setSessionGameMode(game.GAME_MODES.HUMAN_VS_HUMAN);
+    const liveMatch = game.createInitialState();
+    assert(liveMatch.gameMode === game.GAME_MODES.HUMAN_VS_HUMAN, "the live match should use the mode active when it started");
+
+    game.setSessionGameMode(game.GAME_MODES.HUMAN_VS_AI);
+    const restartedState = game.createRestartState(liveMatch);
+    assert(restartedState.gameMode === game.GAME_MODES.HUMAN_VS_AI, "restart should pick up the latest session mode");
+  } finally {
+    game.setSessionGameMode(previousMode);
+  }
 });
 
 test("new game keeps the currently open side menu", () => {
@@ -196,6 +229,22 @@ test("keyboard shortcut e ends the turn", () => {
   assert(handled === true, "shortcut should end the turn");
   assert(state.currentPlayerIndex === 1, "turn should pass to the next player");
   assert(state.players[1].manaAtual === 2, "next player should start with refreshed mana");
+});
+
+test("keyboard shortcuts are blocked during the ai-controlled turn", () => {
+  const state = game.createInitialState();
+  const handBeforeDraw = state.players[1].hand.length;
+  const deckBeforeDraw = state.deck.length;
+
+  state.currentPlayerIndex = 1;
+  state.players[1].manaAtual = 2;
+  state.players[1].manaMax = 2;
+
+  const handled = game.handleShortcutAction(state, "c");
+
+  assert(handled === false, "human shortcuts should be blocked while the AI controls the turn");
+  assert(state.players[1].hand.length === handBeforeDraw, "blocked AI turn shortcuts should not change the hand");
+  assert(state.deck.length === deckBeforeDraw, "blocked AI turn shortcuts should not draw from the deck");
 });
 
 test("keyboard shortcut escape cancels a prepared effect and refunds mana", () => {
@@ -446,6 +495,163 @@ test("group hand by category keeps cards in their correct columns", () => {
   assert(grouped.unidade[0].nome === "Escudeiro", "units should be ordered from lowest to highest cost");
   assert(grouped.unidade[1].nome === "Guardiao", "units with middle costs should stay in the middle");
   assert(grouped.unidade[2].nome === "Berserker", "higher cost units should appear last in the hand column");
+});
+
+test("ai helper only controls player 2 in Humano vs IA", () => {
+  const state = game.createInitialState();
+
+  assert(game.isAiEnabled(state) === true, "ai mode should be enabled by default");
+  assert(game.isAiControlledPlayer(state, 0) === false, "player 1 should stay human in ai mode");
+  assert(game.isAiControlledPlayer(state, 1) === true, "player 2 should be controlled by the ai in ai mode");
+
+  state.gameMode = game.GAME_MODES.HUMAN_VS_HUMAN;
+  assert(game.isAiEnabled(state) === false, "human vs human should disable the ai");
+  assert(game.isAiControlledPlayer(state, 1) === false, "player 2 should stop being ai-controlled in human mode");
+});
+
+test("ai action helper prioritizes killing an enemy unit before attacking the player", () => {
+  const state = game.createInitialState();
+  state.currentPlayerIndex = 1;
+  state.players[1].board = [{
+    id: "ai-attacker",
+    instanceId: "ai-attacker",
+    nome: "Guardiao de Ferro",
+    categoria: "unidade",
+    custo: 4,
+    ataque: 2,
+    vida: 8,
+    vidaBase: 8,
+    descricao: "",
+    estado: "campo",
+    podeAgir: true,
+    jaAtacouNoTurno: false
+  }];
+  state.players[0].board = [{
+    id: "enemy-threat",
+    instanceId: "enemy-threat",
+    nome: "Arqueira Nebulosa",
+    categoria: "unidade",
+    custo: 3,
+    ataque: 3,
+    vida: 2,
+    vidaBase: 3,
+    descricao: "",
+    estado: "campo",
+    podeAgir: true,
+    jaAtacouNoTurno: false
+  }];
+
+  const action = game.getNextAiAction(state);
+
+  assert(action.type === "attack-unit", "the ai should remove a killable enemy unit before going face");
+  assert(action.targetInstanceId === "enemy-threat", "the ai should focus the threatening enemy unit");
+});
+
+test("ai action helper uses exposed support targets only when no enemy units remain", () => {
+  const state = game.createInitialState();
+  state.currentPlayerIndex = 1;
+  state.players[1].board = [{
+    id: "ai-attacker",
+    instanceId: "ai-attacker",
+    nome: "Escudeiro Solar",
+    categoria: "unidade",
+    custo: 2,
+    ataque: 2,
+    vida: 5,
+    vidaBase: 5,
+    descricao: "",
+    estado: "campo",
+    podeAgir: true,
+    jaAtacouNoTurno: false
+  }];
+  state.players[0].supportZone = [{
+    id: "support-1",
+    instanceId: "support-1-a",
+    nome: "Estandarte de Guerra",
+    categoria: "suporte",
+    custo: 5,
+    efeito: "aura_ataque",
+    valor: 1,
+    descricao: "",
+    estado: "suporte"
+  }];
+
+  let action = game.getNextAiAction(state);
+  assert(action.type === "attack-support", "the ai should hit exposed supports when the field is clear");
+
+  state.players[0].board = [{
+    id: "enemy-blocker",
+    instanceId: "enemy-blocker",
+    nome: "Escudeiro Solar",
+    categoria: "unidade",
+    custo: 2,
+    ataque: 2,
+    vida: 3,
+    vidaBase: 5,
+    descricao: "",
+    estado: "campo",
+    podeAgir: true,
+    jaAtacouNoTurno: false
+  }];
+
+  action = game.getNextAiAction(state);
+  assert(action.type === "attack-unit", "the ai should stop targeting supports when enemy units are still in play");
+});
+
+test("ai action helper avoids wasting repair on full targets", () => {
+  const state = game.createInitialState();
+  state.currentPlayerIndex = 1;
+  state.players[1].manaAtual = 1;
+  state.players[1].manaMax = 1;
+  state.players[1].hand = [{
+    id: "effect-2",
+    instanceId: "effect-2-a",
+    nome: "Reparo Rapido",
+    categoria: "efeito",
+    custo: 1,
+    efeito: "cura_direta",
+    valor: 6,
+    descricao: ""
+  }];
+  state.deck = [];
+
+  const action = game.getNextAiAction(state);
+
+  assert(action.type === "end-turn", "the ai should not spend repair when every target is already at full life");
+});
+
+test("ai action helper only buys a card when no stronger play exists", () => {
+  const state = game.createInitialState();
+  state.currentPlayerIndex = 1;
+  state.players[1].manaAtual = 1;
+  state.players[1].manaMax = 1;
+  state.players[1].hand = [];
+  state.players[1].board = [];
+  state.players[0].board = [];
+  state.players[0].supportZone = [];
+  state.deck = [{
+    id: "unit-1",
+    instanceId: "unit-1-a",
+    nome: "Escudeiro Solar",
+    categoria: "unidade",
+    custo: 2,
+    ataque: 2,
+    vida: 5,
+    vidaBase: 5,
+    descricao: ""
+  }];
+
+  const action = game.getNextAiAction(state);
+
+  assert(action.type === "draw-card", "the ai should buy a card only after exhausting stronger plays");
+});
+
+test("ai step does not run outside the ai-controlled turn", () => {
+  const state = game.createInitialState();
+
+  const action = game.performAiStep(state);
+
+  assert(action === null, "the ai should not take actions during the human turn");
 });
 
 test("side rail helper reports when any optional panel is open", () => {
@@ -879,8 +1085,10 @@ test("layout markup removes the cancel button and keeps a pending effect slot", 
   assert(!html.includes("id=\"history-view-banner\""), "history mode banner should be removed from the markup");
   assert(!html.includes("id=\"exit-history-view-button\""), "history mode should no longer render a dedicated back button");
   assert(!html.includes("id=\"rewind-history-button\""), "history mode should no longer render a dedicated rewind button");
+  assert(html.includes("id=\"game-mode-select\""), "the hero should expose a mode selector for the next match");
   assert(html.includes("compact-action-button"), "turn action buttons should use the compact button style");
   assert(html.includes("pressione Esc para voltar ao presente"), "rules should describe how to leave history view without dedicated buttons");
+  assert(html.includes("Humano vs IA"), "rules should describe the AI mode");
 });
 
 test("estandarte de guerra now costs 5 mana", () => {

@@ -18,6 +18,13 @@
         <p class="subtitle">Baixe unidades para o campo, mantenha suportes ativos e escolha o momento certo para atacar.</p>
       </div>
       <div class="hero-toggles">
+        <label class="game-mode-picker" for="game-mode-select">
+          <span>Modo</span>
+          <select id="game-mode-select" aria-label="Modo da proxima partida">
+            <option value="human-vs-ai">Humano vs IA</option>
+            <option value="human-vs-human">Humano vs Humano</option>
+          </select>
+        </label>
         <button id="toggle-library-button" class="library-toggle" type="button" aria-expanded="false" aria-controls="library-panel">
           Cartas
         </button>
@@ -213,6 +220,7 @@
           </div>
           <p>Cada jogador comeca com 40 de vida e 4 cartas na mao. O baralho tem 32 cartas no total, com 4 copias de cada carta.</p>
           <p>A mana aumenta a cada rodada ate 8. O segundo jogador recebe +1 de mana em todos os turnos para compensar a vantagem de comecar.</p>
+          <p>O jogo oferece os modos Humano vs IA e Humano vs Humano. Em Humano vs IA, o Jogador 2 age automaticamente, passo a passo, durante o proprio turno.</p>
           <p>Unidades ficam em campo. Suportes permanecem ativos. Efeitos entram em selecao de alvo e vao para o descarte quando resolvidos.</p>
           <p>Cada unidade pode atacar no turno em que entra em campo e depois 1 vez por turno. Se o rival nao tiver unidades em campo, voce pode destruir um suporte com 1 ataque. Reparo Rapido so pode curar alvos feridos.</p>
           <p>No Log, clique em uma linha para ver aquele momento antigo no tabuleiro em modo somente leitura. Clique novamente na mesma linha para voltar para aquele momento com confirmacao, ou clique na linha mais recente ou pressione Esc para voltar ao presente.</p>
