@@ -55,35 +55,58 @@ select {
   gap: 10px;
 }
 
-.game-mode-picker {
+.controller-picker {
   padding: 10px 14px;
   border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 999px;
+  border-radius: 20px;
   background: rgba(255, 255, 255, 0.07);
   color: var(--text);
   display: inline-flex;
-  align-items: center;
+  flex-direction: column;
   gap: 10px;
 }
 
-.game-mode-picker span {
+.controller-picker-label {
   font-size: 0.78rem;
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--muted);
 }
 
-.game-mode-picker select {
-  border: 0;
-  background: transparent;
-  color: var(--text);
-  cursor: pointer;
-  min-width: 148px;
-  outline: none;
+.controller-options {
+  display: inline-flex;
+  gap: 8px;
+  flex-wrap: wrap;
 }
 
-.game-mode-picker select option {
-  color: #091114;
+.controller-option {
+  padding: 8px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text);
+  cursor: pointer;
+  transition: background 160ms ease, border-color 160ms ease, transform 160ms ease, opacity 160ms ease;
+}
+
+.controller-option:hover {
+  transform: translateY(-1px);
+}
+
+.controller-option.is-selected {
+  border-color: rgba(244, 184, 96, 0.42);
+  background: rgba(244, 184, 96, 0.14);
+}
+
+.controller-option:disabled {
+  opacity: 0.62;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.start-toggle {
+  border-color: rgba(244, 184, 96, 0.4);
+  background: rgba(244, 184, 96, 0.16);
 }
 
 .eyebrow {

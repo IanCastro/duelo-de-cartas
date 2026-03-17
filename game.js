@@ -4,14 +4,13 @@
   const MAX_MANA = 8;
   const DRAW_COST = 1;
   const CARD_COPIES_PER_TYPE = 4;
-  const AI_PLAYER_INDEX = 1;
   const AI_STEP_DELAY_MS = 500;
-  const GAME_MODES = Object.freeze({
-    HUMAN_VS_AI: "human-vs-ai",
-    HUMAN_VS_HUMAN: "human-vs-human"
+  const PLAYER_CONTROLLER_TYPES = Object.freeze({
+    HUMAN: "human",
+    AI: "ai"
   });
 
-  let sessionGameMode = GAME_MODES.HUMAN_VS_AI;
+  let sessionPlayerControllers = [PLAYER_CONTROLLER_TYPES.HUMAN, PLAYER_CONTROLLER_TYPES.AI];
   let aiTurnTimerId = null;
 
   const CARD_LIBRARY = [
@@ -128,17 +127,34 @@
     return deck;
   }
 
-  function normalizeGameMode(mode) {
-    return mode === GAME_MODES.HUMAN_VS_HUMAN ? mode : GAME_MODES.HUMAN_VS_AI;
+  function normalizePlayerController(controller) {
+    return controller === PLAYER_CONTROLLER_TYPES.AI ? PLAYER_CONTROLLER_TYPES.AI : PLAYER_CONTROLLER_TYPES.HUMAN;
   }
 
-  function getSessionGameMode() {
-    return sessionGameMode;
+  function normalizePlayerControllers(controllers) {
+    const source = Array.isArray(controllers) ? controllers : sessionPlayerControllers;
+    return [
+      normalizePlayerController(source[0]),
+      normalizePlayerController(source[1])
+    ];
   }
 
-  function setSessionGameMode(mode) {
-    sessionGameMode = normalizeGameMode(mode);
-    return sessionGameMode;
+  function getSessionPlayerControllers() {
+    return [...sessionPlayerControllers];
+  }
+
+  function setSessionPlayerControllers(controllers) {
+    sessionPlayerControllers = normalizePlayerControllers(controllers);
+    return getSessionPlayerControllers();
+  }
+
+  function setSessionPlayerController(playerIndex, controller) {
+    if (playerIndex !== 0 && playerIndex !== 1) {
+      return getSessionPlayerControllers();
+    }
+
+    sessionPlayerControllers[playerIndex] = normalizePlayerController(controller);
+    return getSessionPlayerControllers();
   }
 
   function createPlayer(id, nome) {
@@ -155,11 +171,12 @@
   }
 
   function createInitialState() {
-    const state = {
-      deck: shuffleDeck(createDeck()),
+    return {
+      deck: [],
       discardPile: [],
       currentPlayerIndex: 0,
-      gameMode: getSessionGameMode(),
+      playerControllers: getSessionPlayerControllers(),
+      isMatchStarted: false,
       isAiTurnInProgress: false,
       aiStepText: null,
       isLibraryOpen: false,
@@ -178,17 +195,28 @@
         createPlayer(2, "Guardiao Rubro")
       ]
     };
+  }
 
-    for (let playerIndex = 0; playerIndex < state.players.length; playerIndex += 1) {
+  function startConfiguredMatch(previousState) {
+    const nextState = createInitialState();
+    const preservedControllers = setSessionPlayerControllers(previousState?.playerControllers);
+    nextState.playerControllers = preservedControllers;
+    nextState.isLibraryOpen = Boolean(previousState?.isLibraryOpen);
+    nextState.isRulesOpen = Boolean(previousState?.isRulesOpen);
+    nextState.isLogOpen = Boolean(previousState?.isLogOpen);
+    nextState.isMatchStarted = true;
+    nextState.deck = shuffleDeck(createDeck());
+
+    for (let playerIndex = 0; playerIndex < nextState.players.length; playerIndex += 1) {
       for (let draw = 0; draw < STARTING_HAND_SIZE; draw += 1) {
-        drawCard(state, playerIndex, false);
+        drawCard(nextState, playerIndex, false);
       }
     }
 
-    startTurn(state, 0, false);
-    state.players[1].manaMax = 1;
-    addLog(state, buildInitialLogMessage(state));
-    return state;
+    startTurn(nextState, 0, false);
+    nextState.players[1].manaMax = 1;
+    addLog(nextState, buildInitialLogMessage(nextState));
+    return nextState;
   }
 
   function createRestartState(previousState) {
@@ -198,6 +226,7 @@
       return nextState;
     }
 
+    nextState.playerControllers = setSessionPlayerControllers(previousState.playerControllers);
     nextState.isLibraryOpen = Boolean(previousState.isLibraryOpen);
     nextState.isRulesOpen = Boolean(previousState.isRulesOpen);
     nextState.isLogOpen = Boolean(previousState.isLogOpen);
@@ -221,7 +250,8 @@
       deck: cloneData(state.deck),
       discardPile: cloneData(state.discardPile),
       currentPlayerIndex: state.currentPlayerIndex,
-      gameMode: state.gameMode,
+      playerControllers: cloneData(state.playerControllers),
+      isMatchStarted: state.isMatchStarted,
       isAiTurnInProgress: state.isAiTurnInProgress,
       aiStepText: state.aiStepText,
       isLibraryOpen: state.isLibraryOpen,
@@ -262,7 +292,8 @@
       deck: cloneData(snapshot.deck),
       discardPile: cloneData(snapshot.discardPile),
       currentPlayerIndex: snapshot.currentPlayerIndex,
-      gameMode: normalizeGameMode(snapshot.gameMode),
+      playerControllers: normalizePlayerControllers(snapshot.playerControllers),
+      isMatchStarted: Boolean(snapshot.isMatchStarted),
       isAiTurnInProgress: Boolean(snapshot.isAiTurnInProgress),
       aiStepText: snapshot.aiStepText || null,
       isLibraryOpen: snapshot.isLibraryOpen,
@@ -356,15 +387,24 @@
   }
 
   function isAiEnabled(state) {
-    return Boolean(state && state.gameMode && normalizeGameMode(state.gameMode) === GAME_MODES.HUMAN_VS_AI);
+    return Boolean(
+      state
+      && Array.isArray(state.playerControllers)
+      && state.playerControllers.some((controller) => normalizePlayerController(controller) === PLAYER_CONTROLLER_TYPES.AI)
+    );
   }
 
   function isAiControlledPlayer(state, playerIndex) {
-    return isAiEnabled(state) && playerIndex === AI_PLAYER_INDEX;
+    if (!state || (playerIndex !== 0 && playerIndex !== 1)) {
+      return false;
+    }
+
+    const controllers = normalizePlayerControllers(state?.playerControllers);
+    return controllers[playerIndex] === PLAYER_CONTROLLER_TYPES.AI;
   }
 
   function isAiTurnActive(state) {
-    return Boolean(state && !state.winner && isAiControlledPlayer(state, state.currentPlayerIndex));
+    return Boolean(state && state.isMatchStarted && !state.winner && isAiControlledPlayer(state, state.currentPlayerIndex));
   }
 
   function shouldRunAi(state) {
@@ -747,7 +787,7 @@
   }
 
   function canPlayCard(state, playerIndex, card) {
-    if (state.winner || state.currentPlayerIndex !== playerIndex || state.selectedEffectCard) {
+    if (!state.isMatchStarted || state.winner || state.currentPlayerIndex !== playerIndex || state.selectedEffectCard) {
       return false;
     }
 
@@ -834,7 +874,7 @@
   }
 
   function drawTurnCard(state, playerIndex) {
-    if (state.winner || state.currentPlayerIndex !== playerIndex || state.selectedEffectCard || state.selectedAttackerId) {
+    if (!state.isMatchStarted || state.winner || state.currentPlayerIndex !== playerIndex || state.selectedEffectCard || state.selectedAttackerId) {
       return null;
     }
 
@@ -915,7 +955,7 @@
   }
 
   function resolveEffectTarget(state, playerIndex, targetType, targetInstanceId) {
-    if (state.winner || state.currentPlayerIndex !== playerIndex || !state.selectedEffectCard) {
+    if (!state.isMatchStarted || state.winner || state.currentPlayerIndex !== playerIndex || !state.selectedEffectCard) {
       return false;
     }
 
@@ -957,7 +997,7 @@
   }
 
   function playCard(state, playerIndex, cardInstanceId) {
-    if (state.winner || state.currentPlayerIndex !== playerIndex || state.selectedEffectCard) {
+    if (!state.isMatchStarted || state.winner || state.currentPlayerIndex !== playerIndex || state.selectedEffectCard) {
       return false;
     }
 
@@ -1009,7 +1049,7 @@
   }
 
   function selectAttacker(state, playerIndex, unitInstanceId) {
-    if (state.winner || state.currentPlayerIndex !== playerIndex || state.selectedEffectCard) {
+    if (!state.isMatchStarted || state.winner || state.currentPlayerIndex !== playerIndex || state.selectedEffectCard) {
       return false;
     }
 
@@ -1034,7 +1074,7 @@
       return false;
     }
 
-    if (state.winner || state.currentPlayerIndex !== playerIndex) {
+    if (!state.isMatchStarted || state.winner || state.currentPlayerIndex !== playerIndex) {
       return false;
     }
 
@@ -1119,7 +1159,7 @@
   }
 
   function resolvePlayerHeaderTarget(state, targetPlayerIndex) {
-    if (state.winner || isAiTurnActive(state)) {
+    if (!state.isMatchStarted || state.winner || isAiTurnActive(state)) {
       return false;
     }
 
@@ -1141,7 +1181,7 @@
   }
 
   function getAvailableActions(state, playerIndex = state.currentPlayerIndex) {
-    if (state.winner || state.currentPlayerIndex !== playerIndex) {
+    if (!state.isMatchStarted || state.winner || state.currentPlayerIndex !== playerIndex) {
       return {
         canDraw: false,
         playableCards: 0,
@@ -1168,7 +1208,7 @@
   }
 
   function attemptEndTurn(state, options = {}) {
-    if (state.winner) {
+    if (!state.isMatchStarted || state.winner) {
       return false;
     }
 
@@ -1211,6 +1251,10 @@
     }
 
     if (isViewingHistory(state)) {
+      return false;
+    }
+
+    if (!state.isMatchStarted) {
       return false;
     }
 
@@ -1281,7 +1325,7 @@
   }
 
   function endTurn(state) {
-    if (state.winner) {
+    if (!state.isMatchStarted || state.winner) {
       return;
     }
 
@@ -1465,7 +1509,7 @@
   }
 
   function getPlayerHeaderTargetMode(state, targetPlayerIndex) {
-    if (state.winner) {
+    if (!state.isMatchStarted || state.winner) {
       return null;
     }
 
@@ -1786,7 +1830,8 @@
       deck: cloneData(snapshot.deck),
       discardPile: cloneData(snapshot.discardPile),
       currentPlayerIndex: snapshot.currentPlayerIndex,
-      gameMode: normalizeGameMode(snapshot.gameMode),
+      playerControllers: normalizePlayerControllers(snapshot.playerControllers),
+      isMatchStarted: Boolean(snapshot.isMatchStarted),
       isAiTurnInProgress: Boolean(snapshot.isAiTurnInProgress),
       aiStepText: snapshot.aiStepText || null,
       selectedAttackerId: snapshot.selectedAttackerId,
@@ -1808,6 +1853,7 @@
     const renderedState = getRenderedGameState(state);
     const currentPlayer = getCurrentPlayer(renderedState);
     const renderedCurrentPlayerIsAi = isAiControlledPlayer(renderedState, renderedState.currentPlayerIndex);
+    const matchStarted = Boolean(renderedState.isMatchStarted);
 
     renderedState.players.forEach((player, index) => {
       const groupedHand = groupHandByCategory(player.hand);
@@ -1818,10 +1864,10 @@
       document.getElementById(`player-${player.id}-mana`).textContent = `${player.manaAtual}/${player.manaMax}`;
       const playerNameButton = document.getElementById(`player-${player.id}-name`);
       const playerTargetHint = document.getElementById(`player-${player.id}-target-hint`);
-      const headerTargetMode = (viewingHistory || aiTurnActive) ? null : getPlayerHeaderTargetMode(state, index);
+      const headerTargetMode = (viewingHistory || aiTurnActive || !state.isMatchStarted) ? null : getPlayerHeaderTargetMode(state, index);
 
       if (playerNameButton) {
-        playerNameButton.textContent = player.nome;
+        playerNameButton.textContent = isAiControlledPlayer(renderedState, index) ? `${player.nome} (IA)` : player.nome;
         playerNameButton.disabled = !headerTargetMode;
         playerNameButton.classList.toggle("targetable-name", Boolean(headerTargetMode));
         playerNameButton.classList.toggle("targetable-name-attack", headerTargetMode === "attack");
@@ -1842,7 +1888,7 @@
           `player-${player.id}-hand-${category}`,
           groupedHand[category],
           (card) => createCardElement(card, {
-            interactive: !viewingHistory && !aiTurnActive && canPlayCard(state, index, card),
+            interactive: matchStarted && !viewingHistory && !aiTurnActive && canPlayCard(state, index, card),
             className: player.id === 2 ? "opponent-card" : "",
             player,
             onClick: () => {
@@ -1863,11 +1909,11 @@
         player.board,
         (card) => {
           const isCurrentPlayer = index === renderedState.currentPlayerIndex;
-          const isSelected = !viewingHistory && !aiTurnActive && card.instanceId === state.selectedAttackerId;
-          const canSelect = !viewingHistory && !aiTurnActive && isCurrentPlayer && !state.winner && card.podeAgir && !card.jaAtacouNoTurno && !state.selectedEffectCard;
-          const canBeCombatTargeted = !viewingHistory && !aiTurnActive && !isCurrentPlayer && Boolean(state.selectedAttackerId) && !state.winner;
-          const canBeDamageEffectTargeted = !viewingHistory && !aiTurnActive && !isCurrentPlayer && Boolean(state.selectedEffectCard) && state.selectedEffectCard.efeito === "dano_direto" && !state.winner;
-          const canBeHealingEffectTargeted = !viewingHistory && !aiTurnActive && isCurrentPlayer
+          const isSelected = matchStarted && !viewingHistory && !aiTurnActive && card.instanceId === state.selectedAttackerId;
+          const canSelect = matchStarted && !viewingHistory && !aiTurnActive && isCurrentPlayer && !state.winner && card.podeAgir && !card.jaAtacouNoTurno && !state.selectedEffectCard;
+          const canBeCombatTargeted = matchStarted && !viewingHistory && !aiTurnActive && !isCurrentPlayer && Boolean(state.selectedAttackerId) && !state.winner;
+          const canBeDamageEffectTargeted = matchStarted && !viewingHistory && !aiTurnActive && !isCurrentPlayer && Boolean(state.selectedEffectCard) && state.selectedEffectCard.efeito === "dano_direto" && !state.winner;
+          const canBeHealingEffectTargeted = matchStarted && !viewingHistory && !aiTurnActive && isCurrentPlayer
             && Boolean(state.selectedEffectCard)
             && state.selectedEffectCard.efeito === "cura_direta"
             && !state.winner
@@ -1900,7 +1946,8 @@
         player.supportZone,
         (card) => {
           const isCurrentPlayer = index === renderedState.currentPlayerIndex;
-          const canBeSupportTargeted = !viewingHistory
+          const canBeSupportTargeted = matchStarted
+            && !viewingHistory
             && !aiTurnActive
             && !isCurrentPlayer
             && Boolean(state.selectedAttackerId)
@@ -1924,16 +1971,20 @@
       );
     });
 
-    const availableActions = viewingHistory
+    const availableActions = !state.isMatchStarted || viewingHistory
       ? { hasAny: false }
       : getAvailableActions(state, state.currentPlayerIndex);
-    document.getElementById("turn-indicator").textContent = renderedState.winner
+    document.getElementById("turn-indicator").textContent = !matchStarted
+      ? "Pre-jogo"
+      : renderedState.winner
       ? `${renderedState.winner.nome} venceu`
       : renderedCurrentPlayerIsAi
         ? `${currentPlayer.nome} (IA)`
         : currentPlayer.nome;
     document.getElementById("turn-status").textContent = viewingHistory
       ? "Visualizando um momento passado em somente leitura. Use Esc ou a linha mais recente do Log para voltar ao presente."
+      : !state.isMatchStarted
+      ? "Configure Jogador 1 e Jogador 2 como Humano ou IA e pressione Start para iniciar a partida."
       : state.winner
       ? "A partida terminou. Inicie uma nova partida para jogar novamente."
       : aiTurnActive
@@ -1960,7 +2011,8 @@
     const toggleLibraryButton = document.getElementById("toggle-library-button");
     const toggleRulesButton = document.getElementById("toggle-rules-button");
     const toggleLogButton = document.getElementById("toggle-log-button");
-    const gameModeSelect = document.getElementById("game-mode-select");
+    const startButton = document.getElementById("start-button");
+    const restartButton = document.getElementById("restart-button");
     const anySidePanelOpen = isAnySidePanelOpen(state);
 
     if (boardElement && sideRail && libraryPanel && rulesPanel && logPanel && toggleLibraryButton && toggleRulesButton && toggleLogButton) {
@@ -1979,8 +2031,34 @@
       toggleLogButton.setAttribute("aria-expanded", String(state.isLogOpen));
     }
 
-    if (gameModeSelect) {
-      gameModeSelect.value = getSessionGameMode();
+    [0, 1].forEach((playerIndex) => {
+      const selectedController = normalizePlayerControllers(state.playerControllers)[playerIndex];
+      const humanButton = document.getElementById(`player-${playerIndex + 1}-controller-human`);
+      const aiButton = document.getElementById(`player-${playerIndex + 1}-controller-ai`);
+
+      if (humanButton) {
+        const isSelected = selectedController === PLAYER_CONTROLLER_TYPES.HUMAN;
+        humanButton.disabled = state.isMatchStarted;
+        humanButton.classList.toggle("is-selected", isSelected);
+        humanButton.setAttribute("aria-pressed", String(isSelected));
+      }
+
+      if (aiButton) {
+        const isSelected = selectedController === PLAYER_CONTROLLER_TYPES.AI;
+        aiButton.disabled = state.isMatchStarted;
+        aiButton.classList.toggle("is-selected", isSelected);
+        aiButton.setAttribute("aria-pressed", String(isSelected));
+      }
+    });
+
+    if (startButton) {
+      startButton.hidden = state.isMatchStarted;
+      startButton.disabled = state.isMatchStarted;
+    }
+
+    if (restartButton) {
+      restartButton.hidden = !state.isMatchStarted;
+      restartButton.disabled = !state.isMatchStarted;
     }
 
     const turnActionsPanel = document.getElementById("player-turn-actions-panel");
@@ -1990,15 +2068,21 @@
     const playerTwoPendingSlot = document.getElementById("player-2-pending-slot");
 
     if (turnActionsPanel && playerOneTurnActionSlot && playerTwoTurnActionSlot) {
-      const activeTurnSlot = currentPlayer.id === 1 ? playerOneTurnActionSlot : playerTwoTurnActionSlot;
-      const inactiveTurnSlot = currentPlayer.id === 1 ? playerTwoTurnActionSlot : playerOneTurnActionSlot;
+      if (!matchStarted) {
+        turnActionsPanel.hidden = true;
+        playerOneTurnActionSlot.hidden = true;
+        playerTwoTurnActionSlot.hidden = true;
+      } else {
+        const activeTurnSlot = currentPlayer.id === 1 ? playerOneTurnActionSlot : playerTwoTurnActionSlot;
+        const inactiveTurnSlot = currentPlayer.id === 1 ? playerTwoTurnActionSlot : playerOneTurnActionSlot;
 
-      activeTurnSlot.hidden = false;
-      inactiveTurnSlot.hidden = true;
-      turnActionsPanel.hidden = false;
+        activeTurnSlot.hidden = false;
+        inactiveTurnSlot.hidden = true;
+        turnActionsPanel.hidden = false;
 
-      if (turnActionsPanel.parentElement !== activeTurnSlot) {
-        activeTurnSlot.appendChild(turnActionsPanel);
+        if (turnActionsPanel.parentElement !== activeTurnSlot) {
+          activeTurnSlot.appendChild(turnActionsPanel);
+        }
       }
     }
 
@@ -2009,7 +2093,7 @@
       inactivePendingSlot.hidden = true;
       inactivePendingSlot.innerHTML = "";
 
-      if (viewingHistory) {
+      if (!matchStarted || viewingHistory) {
         activePendingSlot.hidden = true;
         activePendingSlot.innerHTML = "";
       } else if (state.selectedEffectCard) {
@@ -2034,37 +2118,44 @@
     const drawButton = document.getElementById("draw-button");
     const endTurnButton = document.getElementById("end-turn-button");
 
-    drawButton.disabled = viewingHistory || aiTurnActive || Boolean(state.winner) || Boolean(state.selectedAttackerId) || Boolean(state.selectedEffectCard) || !state.deck.length || !canAfford(getCurrentPlayer(state), DRAW_COST);
-    endTurnButton.disabled = viewingHistory || aiTurnActive || Boolean(state.winner);
-    endTurnButton.classList.toggle("ready-to-end-turn", !viewingHistory && !aiTurnActive && !state.winner && !availableActions.hasAny);
+    drawButton.disabled = !state.isMatchStarted || viewingHistory || aiTurnActive || Boolean(state.winner) || Boolean(state.selectedAttackerId) || Boolean(state.selectedEffectCard) || !state.deck.length || !canAfford(getCurrentPlayer(state), DRAW_COST);
+    endTurnButton.disabled = !state.isMatchStarted || viewingHistory || aiTurnActive || Boolean(state.winner);
+    endTurnButton.classList.toggle("ready-to-end-turn", state.isMatchStarted && !viewingHistory && !aiTurnActive && !state.winner && !availableActions.hasAny);
 
     const logElement = document.getElementById("game-log");
     logElement.innerHTML = "";
-    getDisplayLogEntries(state.log).forEach((entry) => {
-      const item = document.createElement("button");
-      item.type = "button";
-      item.className = `log-entry${state.selectedLogEntryId === entry.id ? " is-selected" : ""}`;
-      item.innerHTML = `
-        <span class="log-entry-number">${entry.numero}</span>
-        <span class="log-entry-text">${entry.texto}</span>
-      `;
-      item.addEventListener("click", () => {
-        const nextState = handleLogEntryClick(state, entry.id, {
-          confirmFn: typeof window !== "undefined" ? window.confirm.bind(window) : null
+    if (!state.log.length) {
+      const empty = document.createElement("div");
+      empty.className = "empty-state";
+      empty.textContent = "A partida ainda nao comecou.";
+      logElement.appendChild(empty);
+    } else {
+      getDisplayLogEntries(state.log).forEach((entry) => {
+        const item = document.createElement("button");
+        item.type = "button";
+        item.className = `log-entry${state.selectedLogEntryId === entry.id ? " is-selected" : ""}`;
+        item.innerHTML = `
+          <span class="log-entry-number">${entry.numero}</span>
+          <span class="log-entry-text">${entry.texto}</span>
+        `;
+        item.addEventListener("click", () => {
+          const nextState = handleLogEntryClick(state, entry.id, {
+            confirmFn: typeof window !== "undefined" ? window.confirm.bind(window) : null
+          });
+          if (nextState !== state) {
+            state = nextState;
+            gameState = nextState;
+          }
+          render(state);
         });
-        if (nextState !== state) {
-          state = nextState;
-          gameState = nextState;
-        }
-        render(state);
+        logElement.appendChild(item);
       });
-      logElement.appendChild(item);
-    });
+    }
 
     renderLibrary(state);
 
-    document.getElementById("player-bottom-panel").classList.toggle("active", renderedState.currentPlayerIndex === 0 && !renderedState.winner);
-    document.getElementById("player-top-panel").classList.toggle("active", renderedState.currentPlayerIndex === 1 && !renderedState.winner);
+    document.getElementById("player-bottom-panel").classList.toggle("active", matchStarted && renderedState.currentPlayerIndex === 0 && !renderedState.winner);
+    document.getElementById("player-top-panel").classList.toggle("active", matchStarted && renderedState.currentPlayerIndex === 1 && !renderedState.winner);
 
     const winnerModal = document.getElementById("winner-modal");
     const winnerModalTitle = document.getElementById("winner-modal-title");
@@ -2106,9 +2197,26 @@
       render(gameState);
     });
 
-    document.getElementById("game-mode-select").addEventListener("change", (event) => {
-      setSessionGameMode(event.target.value);
-      event.target.value = getSessionGameMode();
+    document.querySelectorAll("[data-controller-button]").forEach((button) => {
+      button.addEventListener("click", () => {
+        if (gameState.isMatchStarted) {
+          return;
+        }
+
+        const playerIndex = Number(button.dataset.playerIndex);
+        const controller = button.dataset.controller;
+        gameState.playerControllers = setSessionPlayerController(playerIndex, controller);
+        render(gameState);
+      });
+    });
+
+    document.getElementById("start-button").addEventListener("click", () => {
+      if (gameState.isMatchStarted) {
+        return;
+      }
+
+      cancelAiTurn(gameState);
+      gameState = startConfiguredMatch(gameState);
       render(gameState);
     });
 
@@ -2186,13 +2294,14 @@
       DRAW_COST,
       CARD_COPIES_PER_TYPE,
       AI_STEP_DELAY_MS,
-      GAME_MODES,
+      PLAYER_CONTROLLER_TYPES,
       CARD_LIBRARY,
-      getSessionGameMode,
-      setSessionGameMode,
+      getSessionPlayerControllers,
+      setSessionPlayerController,
       createDeck,
       shuffleDeck,
       createInitialState,
+      startConfiguredMatch,
       createRestartState,
       drawCard,
       drawTurnCard,
@@ -2216,6 +2325,7 @@
       toggleExclusiveSidePanel,
       isAiEnabled,
       isAiControlledPlayer,
+      isAiTurnActive,
       createStateSnapshot,
       restoreStateFromSnapshot,
       rewindToLogEntry,
@@ -2238,3 +2348,4 @@
     };
   }
 })();
+

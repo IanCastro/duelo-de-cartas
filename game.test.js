@@ -19,10 +19,33 @@ function test(name, callback) {
   }
 }
 
-test("initial state sets health, hands, and starting mana", () => {
+function createStartedState(playerControllers = [game.PLAYER_CONTROLLER_TYPES.HUMAN, game.PLAYER_CONTROLLER_TYPES.AI]) {
+  const state = game.createInitialState();
+  state.playerControllers = [...playerControllers];
+  return game.startConfiguredMatch(state);
+}
+
+test("initial state opens in pre-game with default player controllers", () => {
   const state = game.createInitialState();
 
-  assert(state.gameMode === game.GAME_MODES.HUMAN_VS_AI, "new sessions should default to Humano vs IA");
+  assert(state.isMatchStarted === false, "the page should open in pre-game");
+  assert(state.players[0].vida === 40, "player 1 should start at max health");
+  assert(state.players[1].vida === 40, "player 2 should start at max health");
+  assert(state.players[0].hand.length === 0, "player 1 hand should stay empty before Start");
+  assert(state.players[1].hand.length === 0, "player 2 hand should stay empty before Start");
+  assert(state.players[0].manaAtual === 0 && state.players[0].manaMax === 0, "player 1 should not have mana before Start");
+  assert(state.players[1].manaAtual === 0 && state.players[1].manaMax === 0, "player 2 should not have mana before Start");
+  assert(Array.isArray(state.playerControllers), "the game should store controller config by player");
+  assert(state.playerControllers[0] === game.PLAYER_CONTROLLER_TYPES.HUMAN, "player 1 should default to human");
+  assert(state.playerControllers[1] === game.PLAYER_CONTROLLER_TYPES.AI, "player 2 should default to ai");
+  assert(Array.isArray(state.log), "game should keep a log array");
+  assert(state.log.length === 0, "pre-game should not start with match log entries");
+});
+
+test("start builds the initial match from the configured players", () => {
+  const state = createStartedState();
+
+  assert(state.isMatchStarted === true, "Start should create an active match");
   assert(state.players[0].vida === 40, "player 1 should start at max health");
   assert(state.players[1].vida === 40, "player 2 should start at max health");
   assert(state.players[0].hand.length === 4, "player 1 should draw 4 starting cards");
@@ -35,40 +58,29 @@ test("initial state sets health, hands, and starting mana", () => {
   assert(state.log[0].texto.includes("Partida iniciada"), "first log line should describe the start of the match");
 });
 
-test("session game mode controls how new matches start", () => {
-  const previousMode = game.getSessionGameMode();
+test("session player controllers control how new matches start", () => {
+  const previousControllers = game.getSessionPlayerControllers();
 
   try {
-    game.setSessionGameMode(game.GAME_MODES.HUMAN_VS_HUMAN);
+    game.setSessionPlayerController(0, game.PLAYER_CONTROLLER_TYPES.AI);
+    game.setSessionPlayerController(1, game.PLAYER_CONTROLLER_TYPES.HUMAN);
     const humanMatch = game.createInitialState();
-    assert(humanMatch.gameMode === game.GAME_MODES.HUMAN_VS_HUMAN, "new matches should use the session mode selection");
+    assert(humanMatch.playerControllers[0] === game.PLAYER_CONTROLLER_TYPES.AI, "new pre-game states should use the session player 1 selection");
+    assert(humanMatch.playerControllers[1] === game.PLAYER_CONTROLLER_TYPES.HUMAN, "new pre-game states should use the session player 2 selection");
 
-    game.setSessionGameMode(game.GAME_MODES.HUMAN_VS_AI);
+    game.setSessionPlayerController(0, game.PLAYER_CONTROLLER_TYPES.HUMAN);
+    game.setSessionPlayerController(1, game.PLAYER_CONTROLLER_TYPES.AI);
     const aiMatch = game.createInitialState();
-    assert(aiMatch.gameMode === game.GAME_MODES.HUMAN_VS_AI, "changing the session mode should affect the next new match");
+    assert(aiMatch.playerControllers[0] === game.PLAYER_CONTROLLER_TYPES.HUMAN, "changing the session player 1 selection should affect the next new match");
+    assert(aiMatch.playerControllers[1] === game.PLAYER_CONTROLLER_TYPES.AI, "changing the session player 2 selection should affect the next new match");
   } finally {
-    game.setSessionGameMode(previousMode);
-  }
-});
-
-test("restart uses the current session mode for the next game", () => {
-  const previousMode = game.getSessionGameMode();
-
-  try {
-    game.setSessionGameMode(game.GAME_MODES.HUMAN_VS_HUMAN);
-    const liveMatch = game.createInitialState();
-    assert(liveMatch.gameMode === game.GAME_MODES.HUMAN_VS_HUMAN, "the live match should use the mode active when it started");
-
-    game.setSessionGameMode(game.GAME_MODES.HUMAN_VS_AI);
-    const restartedState = game.createRestartState(liveMatch);
-    assert(restartedState.gameMode === game.GAME_MODES.HUMAN_VS_AI, "restart should pick up the latest session mode");
-  } finally {
-    game.setSessionGameMode(previousMode);
+    game.setSessionPlayerController(0, previousControllers[0]);
+    game.setSessionPlayerController(1, previousControllers[1]);
   }
 });
 
 test("new game keeps the currently open side menu", () => {
-  const previousState = game.createInitialState();
+  const previousState = createStartedState();
   previousState.isRulesOpen = true;
   previousState.isLibraryOpen = false;
   previousState.isLogOpen = false;
@@ -82,11 +94,47 @@ test("new game keeps the currently open side menu", () => {
   assert(restartedState.isLogOpen === false, "restart should keep unrelated menus closed");
   assert(restartedState.selectedLogEntryId === null, "restart should clear any selected history line");
   assert(restartedState.isWinnerModalOpen === false, "restart should close the winner modal in the new game");
-  assert(restartedState.log.length === 1, "restart should still begin with a fresh initial log entry");
+  assert(restartedState.isMatchStarted === false, "restart should return to pre-game");
+  assert(restartedState.log.length === 0, "restart should clear the old match log");
+});
+
+test("new game preserves the configured controllers", () => {
+  const previousState = createStartedState();
+  previousState.playerControllers = [game.PLAYER_CONTROLLER_TYPES.AI, game.PLAYER_CONTROLLER_TYPES.HUMAN];
+
+  const restartedState = game.createRestartState(previousState);
+
+  assert(restartedState.playerControllers[0] === game.PLAYER_CONTROLLER_TYPES.AI, "restart should preserve player 1 controller");
+  assert(restartedState.playerControllers[1] === game.PLAYER_CONTROLLER_TYPES.HUMAN, "restart should preserve player 2 controller");
+});
+
+test("pre-game blocks shortcuts and gameplay actions until Start", () => {
+  const state = game.createInitialState();
+
+  assert(game.handleShortcutAction(state, "c") === false, "pre-game should block draw shortcuts");
+  assert(game.handleShortcutAction(state, "e") === false, "pre-game should block end-turn shortcuts");
+  assert(game.attemptEndTurn(state) === false, "pre-game should not allow ending turns");
+  assert(game.drawTurnCard(state, 0) === null, "pre-game should not allow drawing cards");
+});
+
+test("starting with player 1 as ai makes the ai open the match", () => {
+  const startedState = createStartedState([game.PLAYER_CONTROLLER_TYPES.AI, game.PLAYER_CONTROLLER_TYPES.HUMAN]);
+
+  assert(startedState.isMatchStarted === true, "Start should still create the match");
+  assert(game.isAiControlledPlayer(startedState, 0) === true, "player 1 should be controlled by the ai");
+  assert(game.isAiTurnActive(startedState) === true, "the opening turn should be flagged as an ai turn");
+});
+
+test("starting with both players as ai enables ai vs ai", () => {
+  const startedState = createStartedState([game.PLAYER_CONTROLLER_TYPES.AI, game.PLAYER_CONTROLLER_TYPES.AI]);
+
+  assert(game.isAiControlledPlayer(startedState, 0) === true, "player 1 should be ai-controlled");
+  assert(game.isAiControlledPlayer(startedState, 1) === true, "player 2 should be ai-controlled");
+  assert(game.isAiEnabled(startedState) === true, "ai should stay enabled when both players are configured as ai");
 });
 
 test("mana grows by turn up to the cap and refills", () => {
-  const state = game.createInitialState();
+  const state = createStartedState();
 
   game.endTurn(state);
   assert(state.players[1].manaAtual === 2 && state.players[1].manaMax === 2, "player 2 should get 2 mana on first turn");
@@ -105,7 +153,7 @@ test("mana grows by turn up to the cap and refills", () => {
 });
 
 test("drawing spends mana and fails without enough resource", () => {
-  const state = game.createInitialState();
+  const state = createStartedState();
   const deckBeforeDraw = state.deck.length;
 
   const drawResult = game.drawTurnCard(state, 0);
@@ -118,7 +166,7 @@ test("drawing spends mana and fails without enough resource", () => {
 });
 
 test("drawing is blocked while an attack is being aimed", () => {
-  const state = game.createInitialState();
+  const state = createStartedState();
   state.players[0].board = [{
     id: "atk",
     instanceId: "atk",
@@ -143,7 +191,7 @@ test("drawing is blocked while an attack is being aimed", () => {
 });
 
 test("keyboard shortcut c buys a card when the action is available", () => {
-  const state = game.createInitialState();
+  const state = createStartedState();
   const handBeforeDraw = state.players[0].hand.length;
   const deckBeforeDraw = state.deck.length;
 
@@ -156,7 +204,7 @@ test("keyboard shortcut c buys a card when the action is available", () => {
 });
 
 test("keyboard shortcut a attacks the rival player with the selected unit", () => {
-  const state = game.createInitialState();
+  const state = createStartedState();
   state.players[0].board = [{
     id: "atk",
     instanceId: "atk",
@@ -181,13 +229,13 @@ test("keyboard shortcut a attacks the rival player with the selected unit", () =
 });
 
 test("player header target mode exposes attack and heal player targets", () => {
-  const attackState = game.createInitialState();
+  const attackState = createStartedState();
   attackState.selectedAttackerId = "atk";
 
   assert(game.getPlayerHeaderTargetMode(attackState, 0) === null, "own header should not be attackable");
   assert(game.getPlayerHeaderTargetMode(attackState, 1) === "attack", "enemy header should become an attack target");
 
-  const healState = game.createInitialState();
+  const healState = createStartedState();
   healState.players[0].vida = 30;
   healState.selectedEffectCard = {
     efeito: "cura_direta"
@@ -198,7 +246,7 @@ test("player header target mode exposes attack and heal player targets", () => {
 });
 
 test("player header resolution uses explicit target clicks", () => {
-  const state = game.createInitialState();
+  const state = createStartedState();
   state.players[0].manaAtual = 2;
   state.players[0].manaMax = 2;
   state.players[0].vida = 34;
@@ -222,7 +270,7 @@ test("player header resolution uses explicit target clicks", () => {
 });
 
 test("keyboard shortcut e ends the turn", () => {
-  const state = game.createInitialState();
+  const state = createStartedState();
 
   const handled = game.handleShortcutAction(state, "e");
 
@@ -232,7 +280,7 @@ test("keyboard shortcut e ends the turn", () => {
 });
 
 test("keyboard shortcuts are blocked during the ai-controlled turn", () => {
-  const state = game.createInitialState();
+  const state = createStartedState();
   const handBeforeDraw = state.players[1].hand.length;
   const deckBeforeDraw = state.deck.length;
 
@@ -248,7 +296,7 @@ test("keyboard shortcuts are blocked during the ai-controlled turn", () => {
 });
 
 test("keyboard shortcut escape cancels a prepared effect and refunds mana", () => {
-  const state = game.createInitialState();
+  const state = createStartedState();
   state.players[0].manaAtual = 3;
   state.players[0].manaMax = 3;
   state.players[0].hand = [{
@@ -272,7 +320,7 @@ test("keyboard shortcut escape cancels a prepared effect and refunds mana", () =
 });
 
 test("keyboard shortcut a does not auto-heal when repair is waiting for an explicit target", () => {
-  const state = game.createInitialState();
+  const state = createStartedState();
   state.players[0].vida = 32;
   state.players[0].manaAtual = 2;
   state.players[0].manaMax = 2;
@@ -296,7 +344,7 @@ test("keyboard shortcut a does not auto-heal when repair is waiting for an expli
 });
 
 test("keyboard shortcuts still work when focus is on a button", () => {
-  const state = game.createInitialState();
+  const state = createStartedState();
   const handBeforeDraw = state.players[0].hand.length;
 
   const handled = game.handleShortcutAction(state, "c", {
@@ -308,7 +356,7 @@ test("keyboard shortcuts still work when focus is on a button", () => {
 });
 
 test("keyboard shortcuts ignore editable targets", () => {
-  const state = game.createInitialState();
+  const state = createStartedState();
   const handBeforeDraw = state.players[0].hand.length;
 
   const handled = game.handleShortcutAction(state, "c", {
@@ -320,7 +368,7 @@ test("keyboard shortcuts ignore editable targets", () => {
 });
 
 test("playing a unit spends mana and the unit can attack immediately", () => {
-  const state = game.createInitialState();
+  const state = createStartedState();
   state.players[0].manaAtual = 3;
   state.players[0].manaMax = 3;
   state.players[0].hand = [{
@@ -345,7 +393,7 @@ test("playing a unit spends mana and the unit can attack immediately", () => {
 });
 
 test("player can play a card and still attack with a ready unit in the same turn", () => {
-  const state = game.createInitialState();
+  const state = createStartedState();
   state.players[0].manaAtual = 6;
   state.players[0].manaMax = 6;
   state.players[0].hand = [{
@@ -386,7 +434,7 @@ test("player can play a card and still attack with a ready unit in the same turn
 });
 
 test("each unit can attack only once per turn", () => {
-  const state = game.createInitialState();
+  const state = createStartedState();
   state.players[0].board = [{
     id: "atk",
     instanceId: "atk",
@@ -411,7 +459,7 @@ test("each unit can attack only once per turn", () => {
 });
 
 test("newly played unit can attack on the same turn but only once", () => {
-  const state = game.createInitialState();
+  const state = createStartedState();
   state.players[0].manaAtual = 3;
   state.players[0].manaMax = 3;
   state.players[0].hand = [{
@@ -437,7 +485,7 @@ test("newly played unit can attack on the same turn but only once", () => {
 });
 
 test("selecting the same ready unit twice cancels the attack selection", () => {
-  const state = game.createInitialState();
+  const state = createStartedState();
   state.players[0].board = [{
     id: "atk",
     instanceId: "atk",
@@ -497,20 +545,24 @@ test("group hand by category keeps cards in their correct columns", () => {
   assert(grouped.unidade[2].nome === "Berserker", "higher cost units should appear last in the hand column");
 });
 
-test("ai helper only controls player 2 in Humano vs IA", () => {
-  const state = game.createInitialState();
+test("ai helper follows the configured controller on each seat", () => {
+  const state = createStartedState();
 
   assert(game.isAiEnabled(state) === true, "ai mode should be enabled by default");
   assert(game.isAiControlledPlayer(state, 0) === false, "player 1 should stay human in ai mode");
   assert(game.isAiControlledPlayer(state, 1) === true, "player 2 should be controlled by the ai in ai mode");
 
-  state.gameMode = game.GAME_MODES.HUMAN_VS_HUMAN;
+  state.playerControllers = [game.PLAYER_CONTROLLER_TYPES.AI, game.PLAYER_CONTROLLER_TYPES.HUMAN];
+  assert(game.isAiControlledPlayer(state, 0) === true, "player 1 should become ai-controlled when configured as ai");
+  assert(game.isAiControlledPlayer(state, 1) === false, "player 2 should stop being ai-controlled when configured as human");
+
+  state.playerControllers = [game.PLAYER_CONTROLLER_TYPES.HUMAN, game.PLAYER_CONTROLLER_TYPES.HUMAN];
   assert(game.isAiEnabled(state) === false, "human vs human should disable the ai");
   assert(game.isAiControlledPlayer(state, 1) === false, "player 2 should stop being ai-controlled in human mode");
 });
 
 test("ai action helper prioritizes killing an enemy unit before attacking the player", () => {
-  const state = game.createInitialState();
+  const state = createStartedState();
   state.currentPlayerIndex = 1;
   state.players[1].board = [{
     id: "ai-attacker",
@@ -548,7 +600,7 @@ test("ai action helper prioritizes killing an enemy unit before attacking the pl
 });
 
 test("ai action helper uses exposed support targets only when no enemy units remain", () => {
-  const state = game.createInitialState();
+  const state = createStartedState();
   state.currentPlayerIndex = 1;
   state.players[1].board = [{
     id: "ai-attacker",
@@ -599,7 +651,7 @@ test("ai action helper uses exposed support targets only when no enemy units rem
 });
 
 test("ai action helper avoids wasting repair on full targets", () => {
-  const state = game.createInitialState();
+  const state = createStartedState();
   state.currentPlayerIndex = 1;
   state.players[1].manaAtual = 1;
   state.players[1].manaMax = 1;
@@ -621,7 +673,7 @@ test("ai action helper avoids wasting repair on full targets", () => {
 });
 
 test("ai action helper only buys a card when no stronger play exists", () => {
-  const state = game.createInitialState();
+  const state = createStartedState();
   state.currentPlayerIndex = 1;
   state.players[1].manaAtual = 1;
   state.players[1].manaMax = 1;
@@ -647,7 +699,7 @@ test("ai action helper only buys a card when no stronger play exists", () => {
 });
 
 test("ai step does not run outside the ai-controlled turn", () => {
-  const state = game.createInitialState();
+  const state = createStartedState();
 
   const action = game.performAiStep(state);
 
@@ -669,7 +721,7 @@ test("side rail helper reports when any optional panel is open", () => {
 });
 
 test("exclusive side panel helper keeps only one menu open at a time", () => {
-  const state = game.createInitialState();
+  const state = createStartedState();
 
   game.toggleExclusiveSidePanel(state, "library");
   assert(state.isLibraryOpen === true, "library should open");
@@ -764,7 +816,7 @@ test("card display data omits dynamic bonus for cards outside the field", () => 
 });
 
 test("end turn refreshes next player's units for combat", () => {
-  const state = game.createInitialState();
+  const state = createStartedState();
   state.players[1].board.push({
     id: "u2",
     instanceId: "u2",
@@ -788,7 +840,7 @@ test("end turn refreshes next player's units for combat", () => {
 });
 
 test("attack against a unit deals damage and discards it if defeated", () => {
-  const state = game.createInitialState();
+  const state = createStartedState();
   state.players[0].board = [{
     id: "atk",
     instanceId: "atk",
@@ -828,7 +880,7 @@ test("attack against a unit deals damage and discards it if defeated", () => {
 });
 
 test("unit can attack an enemy support only when there are no enemy units in play", () => {
-  const state = game.createInitialState();
+  const state = createStartedState();
   state.players[0].board = [{
     id: "atk",
     instanceId: "atk",
@@ -864,7 +916,7 @@ test("unit can attack an enemy support only when there are no enemy units in pla
 });
 
 test("support cannot be attacked while the opponent still has units in play", () => {
-  const state = game.createInitialState();
+  const state = createStartedState();
   state.players[0].board = [{
     id: "atk",
     instanceId: "atk",
@@ -914,7 +966,7 @@ test("support cannot be attacked while the opponent still has units in play", ()
 });
 
 test("direct damage can hit the opposing player", () => {
-  const state = game.createInitialState();
+  const state = createStartedState();
   state.players[0].manaAtual = 2;
   state.players[0].manaMax = 2;
   state.players[0].hand = [{
@@ -939,7 +991,7 @@ test("direct damage can hit the opposing player", () => {
 });
 
 test("direct damage can hit an enemy unit and discard it if defeated", () => {
-  const state = game.createInitialState();
+  const state = createStartedState();
   state.players[0].manaAtual = 2;
   state.players[0].manaMax = 2;
   state.players[0].hand = [{
@@ -976,7 +1028,7 @@ test("direct damage can hit an enemy unit and discard it if defeated", () => {
 });
 
 test("direct damage cannot target allied units", () => {
-  const state = game.createInitialState();
+  const state = createStartedState();
   state.players[0].manaAtual = 2;
   state.players[0].manaMax = 2;
   state.players[0].hand = [{
@@ -1012,7 +1064,7 @@ test("direct damage cannot target allied units", () => {
 });
 
 test("direct damage cannot target supports", () => {
-  const state = game.createInitialState();
+  const state = createStartedState();
   state.players[0].manaAtual = 2;
   state.players[0].manaMax = 2;
   state.players[0].hand = [{
@@ -1045,7 +1097,7 @@ test("direct damage cannot target supports", () => {
 });
 
 test("canceling prepared direct damage refunds mana and returns the card to hand", () => {
-  const state = game.createInitialState();
+  const state = createStartedState();
   const logLengthBefore = state.log.length;
   state.players[0].manaAtual = 2;
   state.players[0].manaMax = 2;
@@ -1085,10 +1137,15 @@ test("layout markup removes the cancel button and keeps a pending effect slot", 
   assert(!html.includes("id=\"history-view-banner\""), "history mode banner should be removed from the markup");
   assert(!html.includes("id=\"exit-history-view-button\""), "history mode should no longer render a dedicated back button");
   assert(!html.includes("id=\"rewind-history-button\""), "history mode should no longer render a dedicated rewind button");
-  assert(html.includes("id=\"game-mode-select\""), "the hero should expose a mode selector for the next match");
+  assert(!html.includes("id=\"game-mode-select\""), "the old shared mode selector should be removed");
+  assert(html.includes("id=\"player-1-controller-human\""), "the hero should expose a controller toggle for player 1");
+  assert(html.includes("id=\"player-2-controller-ai\""), "the hero should expose a controller toggle for player 2");
+  assert(html.includes("id=\"start-button\""), "the hero should expose a Start button for the pre-game");
   assert(html.includes("compact-action-button"), "turn action buttons should use the compact button style");
   assert(html.includes("pressione Esc para voltar ao presente"), "rules should describe how to leave history view without dedicated buttons");
-  assert(html.includes("Humano vs IA"), "rules should describe the AI mode");
+  assert(html.includes("so comeca quando voce clicar em Start"), "rules should describe the pre-game Start flow");
+  assert(html.includes("configuracao fica travada"), "rules should explain that Humano/IA choices lock after Start");
+  assert(html.includes("IA vs IA"), "rules should describe how to configure ai vs ai");
 });
 
 test("estandarte de guerra now costs 5 mana", () => {
@@ -1107,7 +1164,7 @@ test("every card exposes an image path that exists on disk", () => {
 });
 
 test("support with new cost cannot be played below 5 mana", () => {
-  const state = game.createInitialState();
+  const state = createStartedState();
   const logLengthBefore = state.log.length;
   state.players[0].manaAtual = 4;
   state.players[0].manaMax = 4;
@@ -1130,7 +1187,7 @@ test("support with new cost cannot be played below 5 mana", () => {
 });
 
 test("preparing direct damage does not log until it resolves", () => {
-  const state = game.createInitialState();
+  const state = createStartedState();
   const logLengthBefore = state.log.length;
   state.players[0].manaAtual = 2;
   state.players[0].manaMax = 2;
@@ -1152,7 +1209,7 @@ test("preparing direct damage does not log until it resolves", () => {
 });
 
 test("repair can heal the player and respects the new max health", () => {
-  const state = game.createInitialState();
+  const state = createStartedState();
   state.players[0].vida = 35;
   state.players[0].manaAtual = 2;
   state.players[0].manaMax = 2;
@@ -1177,7 +1234,7 @@ test("repair can heal the player and respects the new max health", () => {
 });
 
 test("repair can heal an allied unit without exceeding its base life", () => {
-  const state = game.createInitialState();
+  const state = createStartedState();
   state.players[0].manaAtual = 2;
   state.players[0].manaMax = 2;
   state.players[0].hand = [{
@@ -1214,7 +1271,7 @@ test("repair can heal an allied unit without exceeding its base life", () => {
 });
 
 test("repair cannot be played if every healing target is full", () => {
-  const state = game.createInitialState();
+  const state = createStartedState();
   state.players[0].manaAtual = 3;
   state.players[0].manaMax = 3;
   state.players[0].vida = 40;
@@ -1250,7 +1307,7 @@ test("repair cannot be played if every healing target is full", () => {
 });
 
 test("available actions detect when the player still has meaningful plays", () => {
-  const state = game.createInitialState();
+  const state = createStartedState();
   state.players[0].hand = [{
     id: "cheap",
     instanceId: "cheap",
@@ -1270,7 +1327,7 @@ test("available actions detect when the player still has meaningful plays", () =
 });
 
 test("available actions report no actions when mana, cards, and attacks are exhausted", () => {
-  const state = game.createInitialState();
+  const state = createStartedState();
   state.deck = [];
   state.players[0].manaAtual = 0;
   state.players[0].manaMax = 0;
@@ -1305,7 +1362,7 @@ test("available actions report no actions when mana, cards, and attacks are exha
 });
 
 test("attempting to end turn with available actions depends on confirmation", () => {
-  const state = game.createInitialState();
+  const state = createStartedState();
   let confirmCalls = 0;
 
   const canceled = game.attemptEndTurn(state, {
@@ -1321,7 +1378,7 @@ test("attempting to end turn with available actions depends on confirmation", ()
 });
 
 test("ending turn without actions left should not ask for confirmation", () => {
-  const state = game.createInitialState();
+  const state = createStartedState();
   state.deck = [];
   state.players[0].manaAtual = 0;
   state.players[0].manaMax = 0;
@@ -1341,7 +1398,7 @@ test("ending turn without actions left should not ask for confirmation", () => {
 });
 
 test("winner is detected when player health reaches zero", () => {
-  const state = game.createInitialState();
+  const state = createStartedState();
   state.players[0].board = [{
     id: "atk",
     instanceId: "atk",
@@ -1365,7 +1422,7 @@ test("winner is detected when player health reaches zero", () => {
 });
 
 test("log keeps full history without truncating", () => {
-  const state = game.createInitialState();
+  const state = createStartedState();
 
   for (let i = 0; i < 30; i += 1) {
     state.log.push({
@@ -1380,7 +1437,7 @@ test("log keeps full history without truncating", () => {
 });
 
 test("log entries stay chronological and snapshots allow rewind", () => {
-  const state = game.createInitialState();
+  const state = createStartedState();
   const initialHandSize = state.players[0].hand.length;
 
   state.players[0].manaAtual = 2;
@@ -1400,7 +1457,7 @@ test("log entries stay chronological and snapshots allow rewind", () => {
 });
 
 test("attempting to rewind depends on confirmation", () => {
-  const state = game.createInitialState();
+  const state = createStartedState();
   state.players[0].manaAtual = 2;
   state.players[0].manaMax = 2;
   game.drawTurnCard(state, 0);
@@ -1419,7 +1476,7 @@ test("attempting to rewind depends on confirmation", () => {
 });
 
 test("confirmed rewind restores the selected snapshot", () => {
-  const state = game.createInitialState();
+  const state = createStartedState();
   const initialHandSize = state.players[0].hand.length;
   state.players[0].manaAtual = 2;
   state.players[0].manaMax = 2;
@@ -1435,7 +1492,7 @@ test("confirmed rewind restores the selected snapshot", () => {
 });
 
 test("clicking the selected log entry again rewinds after confirmation", () => {
-  const state = game.createInitialState();
+  const state = createStartedState();
   const initialHandSize = state.players[0].hand.length;
   state.players[0].manaAtual = 2;
   state.players[0].manaMax = 2;
@@ -1460,7 +1517,7 @@ test("clicking the selected log entry again rewinds after confirmation", () => {
 });
 
 test("clicking the latest log entry returns to the present moment", () => {
-  const state = game.createInitialState();
+  const state = createStartedState();
   state.players[0].manaAtual = 2;
   state.players[0].manaMax = 2;
   game.drawTurnCard(state, 0);
@@ -1489,7 +1546,7 @@ test("log display helper shows the newest entry first without renumbering", () =
 });
 
 test("history view depends on log panel and a selected entry", () => {
-  const state = game.createInitialState();
+  const state = createStartedState();
 
   assert(game.isViewingHistory(state) === false, "history view should stay hidden with no selected line");
 
@@ -1504,7 +1561,7 @@ test("history view depends on log panel and a selected entry", () => {
 });
 
 test("rendered game state returns the selected snapshot without mutating the live state", () => {
-  const state = game.createInitialState();
+  const state = createStartedState();
   const liveHandSize = state.players[0].hand.length;
 
   state.players[0].manaAtual = 2;
@@ -1520,7 +1577,7 @@ test("rendered game state returns the selected snapshot without mutating the liv
 });
 
 test("history view blocks keyboard shortcuts that would mutate the live game", () => {
-  const state = game.createInitialState();
+  const state = createStartedState();
   const handSizeBefore = state.players[0].hand.length;
 
   state.isLogOpen = true;
@@ -1533,7 +1590,7 @@ test("history view blocks keyboard shortcuts that would mutate the live game", (
 });
 
 test("keyboard shortcut escape returns to the present while viewing history", () => {
-  const state = game.createInitialState();
+  const state = createStartedState();
 
   state.isLogOpen = true;
   state.selectedLogEntryId = 1;
@@ -1543,3 +1600,4 @@ test("keyboard shortcut escape returns to the present while viewing history", ()
   assert(handled === true, "escape should be handled while viewing history");
   assert(state.selectedLogEntryId === null, "escape should leave history view and return to the present");
 });
+
