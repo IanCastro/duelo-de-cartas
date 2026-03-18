@@ -37,27 +37,47 @@ select {
 .app-shell {
   width: min(1560px, calc(100% - 32px));
   margin: 0 auto;
-  padding: 32px 0 48px;
+  padding: 24px 0 40px;
 }
 
 .hero {
-  margin-bottom: 18px;
+  margin-bottom: 14px;
   display: flex;
   flex-wrap: wrap;
-  align-items: flex-end;
+  align-items: center;
   justify-content: space-between;
-  gap: 16px;
+  gap: 12px 18px;
+}
+
+.hero-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-width: 760px;
 }
 
 .hero-toggles {
   display: flex;
   flex-wrap: wrap;
-  gap: 10px;
+  gap: 8px;
+}
+
+.hero.is-match-started {
+  margin-bottom: 10px;
+}
+
+.hero.is-match-started .eyebrow {
+  margin-bottom: 2px;
+}
+
+.hero.is-match-started .subtitle {
+  max-width: 560px;
+  color: rgba(239, 250, 246, 0.62);
 }
 
 .match-config-panel {
-  margin-bottom: 20px;
-  padding: 18px 20px;
+  margin-bottom: 16px;
+  padding: 16px 18px;
   border: 1px solid var(--line);
   border-radius: 28px;
   background: var(--panel);
@@ -72,37 +92,50 @@ select {
   opacity: 0.92;
 }
 
+.match-config-panel.is-collapsed {
+  padding: 12px 16px;
+  gap: 8px;
+  border-radius: 22px;
+  background: rgba(15, 33, 38, 0.88);
+}
+
+.match-config-panel.is-collapsed .match-config-copy,
+.match-config-panel.is-collapsed .match-config-grid {
+  display: none;
+}
+
 .match-config-copy h2 {
-  margin: 6px 0 0;
-  font-size: clamp(1.4rem, 2.3vw, 1.9rem);
+  margin: 4px 0 0;
+  font-size: clamp(1.18rem, 1.8vw, 1.55rem);
 }
 
 .match-config-copy p:last-child,
 .match-config-copy .turn-label + h2 + p {
-  margin: 8px 0 0;
+  margin: 6px 0 0;
   color: var(--muted);
+  max-width: 760px;
 }
 
 .match-config-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-  gap: 12px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
   align-items: stretch;
 }
 
 .controller-picker {
-  padding: 10px 14px;
+  padding: 10px 12px;
   border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 20px;
+  border-radius: 18px;
   background: rgba(255, 255, 255, 0.07);
   color: var(--text);
   display: inline-flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 8px;
 }
 
 .controller-picker-label {
-  font-size: 0.78rem;
+  font-size: 0.74rem;
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--muted);
@@ -110,17 +143,18 @@ select {
 
 .controller-options {
   display: inline-flex;
-  gap: 8px;
+  gap: 6px;
   flex-wrap: wrap;
 }
 
 .controller-option {
-  padding: 8px 12px;
+  padding: 7px 11px;
   border: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.04);
   color: var(--text);
   cursor: pointer;
+  font-size: 0.92rem;
   transition: background 160ms ease, border-color 160ms ease, transform 160ms ease, opacity 160ms ease;
 }
 
@@ -151,6 +185,47 @@ select {
 
 .match-config-actions .action-button {
   min-height: 100%;
+  padding: 12px 14px;
+}
+
+.match-config-summary[hidden] {
+  display: none !important;
+}
+
+.match-config-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px 14px;
+  flex-wrap: wrap;
+}
+
+.match-config-summary-chips {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.match-config-summary-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 38px;
+  padding: 8px 12px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.match-config-summary-key {
+  color: var(--muted);
+  font-size: 0.74rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.match-config-summary-chip strong {
+  font-size: 0.94rem;
 }
 
 .eyebrow {
@@ -163,18 +238,19 @@ select {
 
 .hero h1 {
   margin: 0;
-  font-size: clamp(2.4rem, 5vw, 4rem);
+  font-size: clamp(2rem, 4vw, 3.2rem);
   line-height: 0.95;
 }
 
 .subtitle {
-  max-width: 700px;
+  max-width: 640px;
   color: var(--muted);
   margin: 0;
+  line-height: 1.35;
 }
 
 .library-toggle {
-  padding: 12px 18px;
+  padding: 10px 16px;
   border: 1px solid rgba(255, 255, 255, 0.12);
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.07);
@@ -204,13 +280,17 @@ select {
 }
 
 .top-game-bar {
-  margin-bottom: 20px;
-  padding: 16px 18px;
+  margin-bottom: 16px;
+  padding: 12px 16px;
   display: flex;
   flex-wrap: wrap;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 16px;
+  gap: 12px 16px;
+}
+
+.top-game-bar.is-match-started {
+  padding-block: 10px 12px;
 }
 
 .top-game-status {
@@ -218,7 +298,7 @@ select {
   min-width: 280px;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 6px;
 }
 
 .ai-match-controls[hidden] {
@@ -234,7 +314,7 @@ select {
 .ai-match-button {
   width: auto;
   min-width: 150px;
-  padding: 10px 14px;
+  padding: 8px 12px;
   border-radius: 14px;
 }
 
@@ -246,7 +326,7 @@ select {
 
 .top-game-copy h2 {
   margin: 0;
-  font-size: clamp(1.6rem, 3vw, 2.2rem);
+  font-size: clamp(1.32rem, 2vw, 1.85rem);
   line-height: 1;
 }
 
@@ -255,7 +335,7 @@ select {
   min-width: 260px;
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 12px;
+  gap: 10px;
 }
 
 .board {
@@ -545,21 +625,21 @@ select {
 
 .deck-stat {
   min-width: 0;
-  padding: 12px 14px;
-  border-radius: 18px;
+  padding: 10px 12px;
+  border-radius: 16px;
   background: var(--panel-strong);
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 4px;
 }
 
 .deck-stat span {
   color: var(--muted);
-  font-size: 0.9rem;
+  font-size: 0.82rem;
 }
 
 .deck-stat strong {
-  font-size: 1.3rem;
+  font-size: 1.08rem;
 }
 
 .rules-panel p {
@@ -1283,7 +1363,7 @@ select {
   }
 
   .match-config-grid {
-    grid-template-columns: 1fr;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .player-summary {
@@ -1345,5 +1425,9 @@ select {
 
   .match-config-panel {
     padding: 16px;
+  }
+
+  .match-config-grid {
+    grid-template-columns: 1fr;
   }
 }

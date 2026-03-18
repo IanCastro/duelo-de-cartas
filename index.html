@@ -12,10 +12,10 @@
 <body>
   <main class="app-shell">
     <header class="hero">
-      <div>
+      <div class="hero-copy">
         <p class="eyebrow">Jogo de cartas local</p>
         <h1>Duelo de Cartas</h1>
-        <p class="subtitle">Baixe unidades para o campo, mantenha suportes ativos e escolha o momento certo para atacar.</p>
+        <p class="subtitle">Baixe unidades, mantenha suportes ativos e escolha o melhor momento para atacar.</p>
       </div>
       <div class="hero-toggles">
         <button id="toggle-library-button" class="library-toggle" type="button" aria-expanded="false" aria-controls="library-panel">
@@ -36,8 +36,8 @@
     <section class="match-config-panel" id="match-config-panel">
       <div class="match-config-copy">
         <p class="turn-label">Configuracao da partida</p>
-        <h2>Defina jogadores e baralho antes do Start</h2>
-        <p>O modo padrao usa baralhos separados com 2 copias de cada carta por jogador.</p>
+        <h2>Defina jogadores e baralho antes do Start.</h2>
+        <p>O padrao usa baralhos separados com 2 copias de cada carta por jogador.</p>
       </div>
 
       <div class="match-config-grid">
@@ -67,6 +67,24 @@
 
         <div class="match-config-actions">
           <button id="start-button" class="action-button" type="button">Start</button>
+        </div>
+      </div>
+
+      <div class="match-config-summary" id="match-config-summary" hidden aria-live="polite">
+        <span class="controller-picker-label">Configuracao ativa</span>
+        <div class="match-config-summary-chips">
+          <span class="match-config-summary-chip">
+            <span class="match-config-summary-key">J1</span>
+            <strong id="match-summary-player-1">Humano</strong>
+          </span>
+          <span class="match-config-summary-chip">
+            <span class="match-config-summary-key">J2</span>
+            <strong id="match-summary-player-2">IA</strong>
+          </span>
+          <span class="match-config-summary-chip">
+            <span class="match-config-summary-key">Baralho</span>
+            <strong id="match-summary-deck-mode">Separado</strong>
+          </span>
         </div>
       </div>
     </section>

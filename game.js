@@ -172,6 +172,14 @@
     ];
   }
 
+  function getControllerDisplayLabel(controller) {
+    return normalizePlayerController(controller) === PLAYER_CONTROLLER_TYPES.AI ? "IA" : "Humano";
+  }
+
+  function getDeckModeDisplayLabel(deckMode) {
+    return normalizeDeckMode(deckMode) === DECK_MODES.SHARED ? "Compartilhado" : "Separado";
+  }
+
   function getSessionPlayerControllers() {
     return [...sessionPlayerControllers];
   }
@@ -3250,8 +3258,14 @@
     const sharedDeckButton = document.getElementById("deck-mode-shared");
     const separateDeckButton = document.getElementById("deck-mode-separate");
     const configPanel = document.getElementById("match-config-panel");
+    const configSummary = document.getElementById("match-config-summary");
+    const summaryPlayerOne = document.getElementById("match-summary-player-1");
+    const summaryPlayerTwo = document.getElementById("match-summary-player-2");
+    const summaryDeckMode = document.getElementById("match-summary-deck-mode");
     const sharedDeckStat = document.getElementById("shared-deck-stat");
     const anySidePanelOpen = isAnySidePanelOpen(state);
+    const heroElement = document.querySelector(".hero");
+    const topGameBar = document.querySelector(".top-game-bar");
 
     if (boardElement && sideRail && libraryPanel && rulesPanel && logPanel && toggleLibraryButton && toggleRulesButton && toggleLogButton) {
       boardElement.classList.toggle("board-with-side-rail", anySidePanelOpen);
@@ -3322,10 +3336,26 @@
 
     if (configPanel) {
       configPanel.classList.toggle("is-locked", state.isMatchStarted);
+      configPanel.classList.toggle("is-collapsed", state.isMatchStarted);
+    }
+
+    if (configSummary && summaryPlayerOne && summaryPlayerTwo && summaryDeckMode) {
+      configSummary.hidden = !state.isMatchStarted;
+      summaryPlayerOne.textContent = getControllerDisplayLabel(state.playerControllers[0]);
+      summaryPlayerTwo.textContent = getControllerDisplayLabel(state.playerControllers[1]);
+      summaryDeckMode.textContent = getDeckModeDisplayLabel(state.deckMode);
     }
 
     if (sharedDeckStat) {
       sharedDeckStat.hidden = renderedState.deckMode === DECK_MODES.SEPARATE;
+    }
+
+    if (heroElement) {
+      heroElement.classList.toggle("is-match-started", state.isMatchStarted);
+    }
+
+    if (topGameBar) {
+      topGameBar.classList.toggle("is-match-started", state.isMatchStarted);
     }
 
     const turnActionsPanel = document.getElementById("player-turn-actions-panel");
