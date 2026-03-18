@@ -14,6 +14,28 @@
     HUMAN: "human",
     AI: "ai"
   });
+  const LOG_VALIDATION_STATUS = Object.freeze({
+    IDLE: "idle",
+    VALID: "valid",
+    INVALID: "invalid"
+  });
+  const LOG_EVENT_TYPES = Object.freeze({
+    MATCH_START: "match-start",
+    DRAW_CARD: "draw-card",
+    PLAY_UNIT: "play-unit",
+    PLAY_SUPPORT: "play-support",
+    EFFECT_DAMAGE_PLAYER: "effect-damage-player",
+    EFFECT_DAMAGE_UNIT: "effect-damage-unit",
+    EFFECT_HEAL_PLAYER: "effect-heal-player",
+    EFFECT_HEAL_UNIT: "effect-heal-unit",
+    ATTACK_PLAYER: "attack-player",
+    ATTACK_UNIT: "attack-unit",
+    ATTACK_SUPPORT: "attack-support",
+    ENTER_DEFENSE: "enter-defense",
+    CANCEL_DEFENSE: "cancel-defense",
+    SUPPORT_HEAL: "support-heal",
+    VICTORY: "victory"
+  });
 
   let sessionPlayerControllers = [PLAYER_CONTROLLER_TYPES.HUMAN, PLAYER_CONTROLLER_TYPES.AI];
   let sessionDeckMode = DECK_MODES.SEPARATE;
@@ -114,16 +136,17 @@
     return CARD_LIBRARY.length * CARD_COPIES_PER_TYPE;
   }
 
-  function instantiateCard(card, suffix) {
+  function instantiateCard(card, suffix, prefix = "") {
+    const baseInstanceId = `${card.id}-${suffix}`;
     return {
       ...card,
-      instanceId: `${card.id}-${suffix}`
+      instanceId: prefix ? `${prefix}-${baseInstanceId}` : baseInstanceId
     };
   }
 
-  function createDeck(copiesPerType = CARD_COPIES_PER_TYPE) {
+  function createDeck(copiesPerType = CARD_COPIES_PER_TYPE, prefix = "") {
     const suffixes = ["a", "b", "c", "d"].slice(0, copiesPerType);
-    return CARD_LIBRARY.flatMap((card) => suffixes.map((suffix) => instantiateCard(card, suffix)));
+    return CARD_LIBRARY.flatMap((card) => suffixes.map((suffix) => instantiateCard(card, suffix, prefix)));
   }
 
   function shuffleDeck(cards) {
@@ -216,6 +239,9 @@
       turnNumber: 1,
       log: [],
       nextLogNumber: 1,
+      logValidationStatus: LOG_VALIDATION_STATUS.IDLE,
+      validatedEntryCount: 0,
+      logValidationIssues: [],
       players: [
         createPlayer(1, "Sentinela Azul"),
         createPlayer(2, "Guardiao Rubro")
@@ -242,8 +268,8 @@
       nextState.deck = [];
       nextState.discardPile = [];
       nextState.playerDecks = [
-        shuffleDeck(createDeck(SEPARATE_DECK_COPIES_PER_TYPE)),
-        shuffleDeck(createDeck(SEPARATE_DECK_COPIES_PER_TYPE))
+        shuffleDeck(createDeck(SEPARATE_DECK_COPIES_PER_TYPE, "p1")),
+        shuffleDeck(createDeck(SEPARATE_DECK_COPIES_PER_TYPE, "p2"))
       ];
       nextState.playerDiscardPiles = [[], []];
     }
@@ -256,7 +282,7 @@
 
     startTurn(nextState, 0, false);
     nextState.players[1].manaMax = 1;
-    addLog(nextState, buildInitialLogMessage(nextState));
+    addLog(nextState, buildInitialLogMessage(nextState), buildInitialLogEvent(nextState));
     return nextState;
   }
 
@@ -279,12 +305,36 @@
     return JSON.parse(JSON.stringify(data));
   }
 
+  function createEmptyLogValidationResult() {
+    return {
+      status: LOG_VALIDATION_STATUS.IDLE,
+      validatedEntryCount: 0,
+      issues: []
+    };
+  }
+
+  function resetLogValidation(state) {
+    const result = createEmptyLogValidationResult();
+    state.logValidationStatus = result.status;
+    state.validatedEntryCount = result.validatedEntryCount;
+    state.logValidationIssues = result.issues;
+  }
+
   function buildInitialLogMessage(state) {
     const playerHands = state.players
       .map((player) => `${player.nome}: ${player.hand.map((card) => card.nome).join(", ")}`)
       .join(" | ");
 
     return `Partida iniciada. ${playerHands}.`;
+  }
+
+  function buildInitialLogEvent(state) {
+    return {
+      kind: LOG_EVENT_TYPES.MATCH_START,
+      currentPlayerIndex: state.currentPlayerIndex,
+      turnNumber: state.turnNumber,
+      deckMode: state.deckMode
+    };
   }
 
   function getDrawPile(state, playerIndex) {
@@ -386,21 +436,24 @@
       id: entry.id,
       numero: entry.numero,
       texto: entry.texto,
+      event: cloneData(entry.event),
       snapshot: cloneData(entry.snapshot)
     }));
   }
 
-  function addLog(state, message) {
+  function addLog(state, message, event = null) {
     const entryNumber = state.nextLogNumber || (state.log.length + 1);
 
     state.log.push({
       id: entryNumber,
       numero: entryNumber,
       texto: message,
+      event: cloneData(event),
       snapshot: createStateSnapshot(state)
     });
 
     state.nextLogNumber = entryNumber + 1;
+    resetLogValidation(state);
   }
 
   function restoreStateFromSnapshot(snapshot, logEntries) {
@@ -426,6 +479,9 @@
       turnNumber: snapshot.turnNumber,
       log: cloneLogEntries(logEntries),
       nextLogNumber: logEntries.length + 1,
+      logValidationStatus: LOG_VALIDATION_STATUS.IDLE,
+      validatedEntryCount: 0,
+      logValidationIssues: [],
       players: cloneData(snapshot.players)
     };
 
@@ -434,6 +490,641 @@
       : null;
 
     return restoredState;
+  }
+
+  function getMatchCardPoolSize(deckMode) {
+    if (deckMode === DECK_MODES.SEPARATE) {
+      return getTotalDeckSize(DECK_MODES.SEPARATE) * 2;
+    }
+
+    return getTotalDeckSize(DECK_MODES.SHARED);
+  }
+
+  function createReplayStateFromSnapshot(snapshot) {
+    return restoreStateFromSnapshot(snapshot, []);
+  }
+
+  function createValidationIssue(entry, code, message) {
+    return {
+      entryId: entry?.id ?? null,
+      numero: entry?.numero ?? null,
+      code,
+      message
+    };
+  }
+
+  function findCardByInstanceId(cards, instanceId) {
+    return Array.isArray(cards)
+      ? cards.find((card) => card.instanceId === instanceId) || null
+      : null;
+  }
+
+  function removeCardByInstanceId(cards, instanceId) {
+    if (!Array.isArray(cards)) {
+      return null;
+    }
+
+    const cardIndex = cards.findIndex((card) => card.instanceId === instanceId);
+    if (cardIndex === -1) {
+      return null;
+    }
+
+    const [card] = cards.splice(cardIndex, 1);
+    return card;
+  }
+
+  function getPlayerIndexById(state, playerId) {
+    return state.players.findIndex((player) => player.id === playerId);
+  }
+
+  function getAllCardsFromStateLike(stateLike) {
+    const cards = [];
+
+    if (!stateLike) {
+      return cards;
+    }
+
+    const pushCards = (list) => {
+      if (Array.isArray(list)) {
+        cards.push(...list);
+      }
+    };
+
+    pushCards(stateLike.deck);
+    pushCards(stateLike.discardPile);
+    pushCards(stateLike.playerDecks?.[0]);
+    pushCards(stateLike.playerDecks?.[1]);
+    pushCards(stateLike.playerDiscardPiles?.[0]);
+    pushCards(stateLike.playerDiscardPiles?.[1]);
+
+    (stateLike.players || []).forEach((player) => {
+      pushCards(player.hand);
+      pushCards(player.board);
+      pushCards(player.supportZone);
+    });
+
+    if (stateLike.selectedEffectCard) {
+      cards.push(stateLike.selectedEffectCard);
+    }
+
+    return cards;
+  }
+
+  function getSnapshotSignature(snapshot) {
+    return JSON.stringify(snapshot);
+  }
+
+  function validateSnapshotIntegrity(snapshot, entry) {
+    const issues = [];
+
+    if (!snapshot) {
+      issues.push(createValidationIssue(entry, "missing-snapshot", "A linha do log nao possui snapshot."));
+      return issues;
+    }
+
+    if (!Array.isArray(snapshot.players) || snapshot.players.length !== 2) {
+      issues.push(createValidationIssue(entry, "invalid-players", "O snapshot nao possui exatamente dois jogadores."));
+      return issues;
+    }
+
+    const deckMode = normalizeDeckMode(snapshot.deckMode);
+    const allCards = getAllCardsFromStateLike(snapshot);
+    const expectedCardCount = getMatchCardPoolSize(deckMode);
+
+    if (allCards.length !== expectedCardCount) {
+      issues.push(createValidationIssue(entry, "card-count-mismatch", `O snapshot deveria ter ${expectedCardCount} cartas no total, mas tem ${allCards.length}.`));
+    }
+
+    const seenInstanceIds = new Set();
+    for (const card of allCards) {
+      if (!card || !card.instanceId) {
+        issues.push(createValidationIssue(entry, "missing-instance-id", "Existe uma carta sem instanceId no snapshot."));
+        continue;
+      }
+
+      if (seenInstanceIds.has(card.instanceId)) {
+        issues.push(createValidationIssue(entry, "duplicate-instance-id", `A carta ${card.instanceId} aparece mais de uma vez no snapshot.`));
+      }
+
+      seenInstanceIds.add(card.instanceId);
+    }
+
+    if (snapshot.currentPlayerIndex !== 0 && snapshot.currentPlayerIndex !== 1) {
+      issues.push(createValidationIssue(entry, "invalid-current-player", "O snapshot possui currentPlayerIndex invalido."));
+    }
+
+    if (!Number.isInteger(snapshot.turnNumber) || snapshot.turnNumber < 1) {
+      issues.push(createValidationIssue(entry, "invalid-turn-number", "O snapshot possui turnNumber invalido."));
+    }
+
+    snapshot.players.forEach((player) => {
+      if (player.vida < 0 || player.vida > MAX_HEALTH) {
+        issues.push(createValidationIssue(entry, "invalid-player-health", `${player.nome} possui vida fora dos limites.`));
+      }
+
+      if (player.manaMax < 0 || player.manaMax > MAX_MANA) {
+        issues.push(createValidationIssue(entry, "invalid-player-mana-max", `${player.nome} possui mana maxima fora dos limites.`));
+      }
+
+      if (player.manaAtual < 0 || player.manaAtual > player.manaMax) {
+        issues.push(createValidationIssue(entry, "invalid-player-mana-current", `${player.nome} possui mana atual fora dos limites.`));
+      }
+
+      player.board.forEach((unit) => {
+        if (unit.vida < 0 || unit.vida > unit.vidaBase) {
+          issues.push(createValidationIssue(entry, "invalid-unit-health", `${unit.nome} possui vida invalida no snapshot.`));
+        }
+
+        if (unit.isDefending && (!Number.isInteger(unit.defenseTurnNumber) || !unit.jaAtacouNoTurno)) {
+          issues.push(createValidationIssue(entry, "invalid-defense-state", `${unit.nome} esta em defesa com estado invalido.`));
+        }
+      });
+    });
+
+    if (snapshot.selectedAttackerId) {
+      const attackerExists = snapshot.players[snapshot.currentPlayerIndex]?.board
+        ?.some((unit) => unit.instanceId === snapshot.selectedAttackerId);
+      if (!attackerExists) {
+        issues.push(createValidationIssue(entry, "invalid-selected-attacker", "selectedAttackerId nao aponta para uma unidade valida do jogador atual."));
+      }
+    }
+
+    if (snapshot.selectedEffectCard && snapshot.selectedEffectCard.categoria !== "efeito") {
+      issues.push(createValidationIssue(entry, "invalid-selected-effect", "selectedEffectCard nao referencia uma carta de efeito."));
+    }
+
+    if (snapshot.winnerPlayerId != null) {
+      const winnerIndex = getPlayerIndexById(snapshot, snapshot.winnerPlayerId);
+      const defeatedExists = snapshot.players.some((player) => player.id !== snapshot.winnerPlayerId && player.vida <= 0);
+      if (winnerIndex === -1 || !defeatedExists) {
+        issues.push(createValidationIssue(entry, "invalid-winner", "O winnerPlayerId do snapshot nao e coerente com a vida dos jogadores."));
+      }
+    }
+
+    return issues;
+  }
+
+  function applySilentReplayTurnTransition(state) {
+    if (!state?.isMatchStarted || state.winner) {
+      return false;
+    }
+
+    if (state.players.some((player) => player.vida <= 0)) {
+      return false;
+    }
+
+    const currentPlayer = getCurrentPlayer(state);
+    const healAmount = getSupportBonus(currentPlayer, "cura_fim_turno");
+    const recovered = Math.min(healAmount, MAX_HEALTH - currentPlayer.vida);
+
+    if (recovered > 0) {
+      return false;
+    }
+
+    state.currentPlayerIndex = (state.currentPlayerIndex + 1) % 2;
+    state.selectedAttackerId = null;
+    state.selectedEffectCard = null;
+    startTurn(state, state.currentPlayerIndex, true);
+    return true;
+  }
+
+  function applyLoggedEvent(state, event) {
+    if (!state || !event || !event.kind) {
+      return { ok: false, code: "missing-event", message: "A linha do log nao possui um evento estruturado valido." };
+    }
+
+    const player = event.playerIndex === 0 || event.playerIndex === 1
+      ? state.players[event.playerIndex]
+      : null;
+    const opponent = event.targetPlayerIndex === 0 || event.targetPlayerIndex === 1
+      ? state.players[event.targetPlayerIndex]
+      : null;
+
+    switch (event.kind) {
+      case LOG_EVENT_TYPES.MATCH_START:
+        return { ok: true };
+
+      case LOG_EVENT_TYPES.DRAW_CARD: {
+        if (!player || state.currentPlayerIndex !== event.playerIndex) {
+          return { ok: false, code: "invalid-draw-player", message: "O replay nao encontrou o jogador correto para a compra." };
+        }
+
+        const drawPile = getDrawPile(state, event.playerIndex);
+        const topCard = drawPile[drawPile.length - 1];
+        if (!topCard || topCard.instanceId !== event.cardInstanceId) {
+          return { ok: false, code: "unexpected-draw-order", message: "A carta comprada nao corresponde ao topo do baralho no replay." };
+        }
+
+        if (!spendMana(player, DRAW_COST)) {
+          return { ok: false, code: "invalid-draw-mana", message: "O replay nao conseguiu pagar o custo da compra." };
+        }
+
+        drawCard(state, event.playerIndex, false);
+        state.selectedAttackerId = null;
+        return { ok: true };
+      }
+
+      case LOG_EVENT_TYPES.PLAY_UNIT: {
+        if (!player || state.currentPlayerIndex !== event.playerIndex) {
+          return { ok: false, code: "invalid-unit-player", message: "O replay nao encontrou o jogador correto para baixar a unidade." };
+        }
+
+        const card = removeCardByInstanceId(player.hand, event.cardInstanceId);
+        if (!card || card.categoria !== "unidade") {
+          return { ok: false, code: "missing-unit-card", message: "A unidade registrada no log nao esta na mao durante o replay." };
+        }
+
+        if (!spendMana(player, card.custo)) {
+          return { ok: false, code: "invalid-unit-mana", message: "O replay nao conseguiu pagar a mana da unidade baixada." };
+        }
+
+        player.board.push({
+          ...card,
+          estado: "campo",
+          podeAgir: true,
+          jaAtacouNoTurno: false,
+          isDefending: false,
+          defenseTurnNumber: null
+        });
+        state.selectedAttackerId = null;
+        return { ok: true };
+      }
+
+      case LOG_EVENT_TYPES.PLAY_SUPPORT: {
+        if (!player || state.currentPlayerIndex !== event.playerIndex) {
+          return { ok: false, code: "invalid-support-player", message: "O replay nao encontrou o jogador correto para ativar o suporte." };
+        }
+
+        const card = removeCardByInstanceId(player.hand, event.cardInstanceId);
+        if (!card || card.categoria !== "suporte") {
+          return { ok: false, code: "missing-support-card", message: "O suporte registrado no log nao esta na mao durante o replay." };
+        }
+
+        if (!spendMana(player, card.custo)) {
+          return { ok: false, code: "invalid-support-mana", message: "O replay nao conseguiu pagar a mana do suporte." };
+        }
+
+        player.supportZone.push({
+          ...card,
+          estado: "suporte"
+        });
+        state.selectedAttackerId = null;
+        return { ok: true };
+      }
+
+      case LOG_EVENT_TYPES.EFFECT_DAMAGE_PLAYER: {
+        if (!player || !opponent || state.currentPlayerIndex !== event.playerIndex) {
+          return { ok: false, code: "invalid-effect-player", message: "O replay nao conseguiu resolver o dano direto no jogador." };
+        }
+
+        const card = removeCardByInstanceId(player.hand, event.cardInstanceId);
+        if (!card || card.efeito !== "dano_direto") {
+          return { ok: false, code: "missing-damage-card", message: "A carta de dano direto nao esta disponivel para replay." };
+        }
+
+        if (!spendMana(player, card.custo)) {
+          return { ok: false, code: "invalid-effect-mana", message: "O replay nao conseguiu pagar a mana do efeito de dano." };
+        }
+
+        if (card.valor !== event.damage) {
+          return { ok: false, code: "damage-mismatch", message: "O dano registrado no evento nao bate com o valor do efeito." };
+        }
+
+        opponent.vida = Math.max(opponent.vida - event.damage, 0);
+        moveCardToDiscardForOwner(state, card, event.playerIndex);
+        state.selectedEffectCard = null;
+        return { ok: true };
+      }
+
+      case LOG_EVENT_TYPES.EFFECT_DAMAGE_UNIT: {
+        if (!player || !opponent || state.currentPlayerIndex !== event.playerIndex) {
+          return { ok: false, code: "invalid-effect-unit-player", message: "O replay nao conseguiu resolver o dano direto na unidade." };
+        }
+
+        const card = removeCardByInstanceId(player.hand, event.cardInstanceId);
+        const target = findCardByInstanceId(opponent.board, event.targetInstanceId);
+        if (!card || card.efeito !== "dano_direto" || !target) {
+          return { ok: false, code: "missing-effect-unit-target", message: "A carta ou o alvo de dano direto nao existem durante o replay." };
+        }
+
+        if (!spendMana(player, card.custo)) {
+          return { ok: false, code: "invalid-effect-unit-mana", message: "O replay nao conseguiu pagar a mana do efeito de dano em unidade." };
+        }
+
+        const expectedDamage = getMitigatedDamage(target, card.valor);
+        if (expectedDamage !== event.damage) {
+          return { ok: false, code: "effect-unit-damage-mismatch", message: "O dano efetivo do evento nao bate com o dano calculado no replay." };
+        }
+
+        target.vida = Math.max(target.vida - event.damage, 0);
+        if (event.defeated) {
+          removeCardByInstanceId(opponent.board, event.targetInstanceId);
+          moveCardToDiscardForOwner(state, target, event.targetPlayerIndex);
+        } else if (target.vida <= 0) {
+          return { ok: false, code: "effect-unit-defeat-mismatch", message: "O replay derrotou a unidade, mas o evento nao marcou derrota." };
+        }
+
+        moveCardToDiscardForOwner(state, card, event.playerIndex);
+        state.selectedEffectCard = null;
+        return { ok: true };
+      }
+
+      case LOG_EVENT_TYPES.EFFECT_HEAL_PLAYER: {
+        if (!player || !opponent || state.currentPlayerIndex !== event.playerIndex) {
+          return { ok: false, code: "invalid-heal-player", message: "O replay nao conseguiu resolver a cura no jogador." };
+        }
+
+        const card = removeCardByInstanceId(player.hand, event.cardInstanceId);
+        if (!card || card.efeito !== "cura_direta") {
+          return { ok: false, code: "missing-heal-card", message: "A carta de cura nao esta disponivel para replay." };
+        }
+
+        if (!spendMana(player, card.custo)) {
+          return { ok: false, code: "invalid-heal-mana", message: "O replay nao conseguiu pagar a mana do efeito de cura." };
+        }
+
+        const targetPlayer = state.players[event.targetPlayerIndex];
+        const expectedRecovered = Math.min(card.valor, MAX_HEALTH - targetPlayer.vida);
+        if (expectedRecovered !== event.recovered) {
+          return { ok: false, code: "heal-player-mismatch", message: "A cura registrada no evento nao bate com a cura calculada no replay." };
+        }
+
+        targetPlayer.vida = Math.min(targetPlayer.vida + card.valor, MAX_HEALTH);
+        moveCardToDiscardForOwner(state, card, event.playerIndex);
+        state.selectedEffectCard = null;
+        return { ok: true };
+      }
+
+      case LOG_EVENT_TYPES.EFFECT_HEAL_UNIT: {
+        if (!player || state.currentPlayerIndex !== event.playerIndex) {
+          return { ok: false, code: "invalid-heal-unit-player", message: "O replay nao conseguiu resolver a cura na unidade." };
+        }
+
+        const card = removeCardByInstanceId(player.hand, event.cardInstanceId);
+        const target = findCardByInstanceId(state.players[event.targetPlayerIndex].board, event.targetInstanceId);
+        if (!card || card.efeito !== "cura_direta" || !target) {
+          return { ok: false, code: "missing-heal-unit-target", message: "A carta ou o alvo de cura nao existem durante o replay." };
+        }
+
+        if (!spendMana(player, card.custo)) {
+          return { ok: false, code: "invalid-heal-unit-mana", message: "O replay nao conseguiu pagar a mana do efeito de cura em unidade." };
+        }
+
+        const expectedRecovered = Math.min(card.valor, target.vidaBase - target.vida);
+        if (expectedRecovered !== event.recovered) {
+          return { ok: false, code: "heal-unit-mismatch", message: "A cura registrada no evento nao bate com a cura calculada no replay." };
+        }
+
+        target.vida = Math.min(target.vida + card.valor, target.vidaBase);
+        moveCardToDiscardForOwner(state, card, event.playerIndex);
+        state.selectedEffectCard = null;
+        return { ok: true };
+      }
+
+      case LOG_EVENT_TYPES.ATTACK_PLAYER: {
+        if (!player || !opponent || state.currentPlayerIndex !== event.playerIndex) {
+          return { ok: false, code: "invalid-attack-player", message: "O replay nao encontrou o ataque ao jogador correto." };
+        }
+
+        const attacker = findCardByInstanceId(player.board, event.attackerInstanceId);
+        if (!attacker) {
+          return { ok: false, code: "missing-attacker", message: "A unidade atacante nao existe no replay." };
+        }
+
+        const expectedDamage = getUnitAttack(attacker, player);
+        if (expectedDamage !== event.damage) {
+          return { ok: false, code: "attack-player-damage-mismatch", message: "O dano do ataque ao jogador nao bate com o calculado no replay." };
+        }
+
+        attacker.jaAtacouNoTurno = true;
+        state.selectedAttackerId = null;
+        opponent.vida = Math.max(opponent.vida - event.damage, 0);
+        return { ok: true };
+      }
+
+      case LOG_EVENT_TYPES.ATTACK_SUPPORT: {
+        if (!player || !opponent || state.currentPlayerIndex !== event.playerIndex) {
+          return { ok: false, code: "invalid-attack-support", message: "O replay nao encontrou o ataque ao suporte correto." };
+        }
+
+        const attacker = findCardByInstanceId(player.board, event.attackerInstanceId);
+        const support = findCardByInstanceId(opponent.supportZone, event.targetInstanceId);
+        if (!attacker || !support) {
+          return { ok: false, code: "missing-support-target", message: "O atacante ou o suporte alvo nao existem no replay." };
+        }
+
+        if (opponent.board.length > 0) {
+          return { ok: false, code: "support-target-blocked", message: "O replay encontrou unidades inimigas em campo ao tentar destruir um suporte." };
+        }
+
+        attacker.jaAtacouNoTurno = true;
+        state.selectedAttackerId = null;
+        removeCardByInstanceId(opponent.supportZone, event.targetInstanceId);
+        moveCardToDiscardForOwner(state, support, event.targetPlayerIndex);
+        return { ok: true };
+      }
+
+      case LOG_EVENT_TYPES.ATTACK_UNIT: {
+        if (!player || !opponent || state.currentPlayerIndex !== event.playerIndex) {
+          return { ok: false, code: "invalid-attack-unit", message: "O replay nao encontrou o ataque a unidade correto." };
+        }
+
+        const attacker = findCardByInstanceId(player.board, event.attackerInstanceId);
+        const target = findCardByInstanceId(opponent.board, event.targetInstanceId);
+        if (!attacker || !target) {
+          return { ok: false, code: "missing-attack-unit-target", message: "O atacante ou a unidade alvo nao existem no replay." };
+        }
+
+        const expectedDamage = getMitigatedDamage(target, getUnitAttack(attacker, player));
+        if (expectedDamage !== event.damage) {
+          return { ok: false, code: "attack-unit-damage-mismatch", message: "O dano do ataque na unidade nao bate com o calculado no replay." };
+        }
+
+        attacker.jaAtacouNoTurno = true;
+        state.selectedAttackerId = null;
+        target.vida = Math.max(target.vida - event.damage, 0);
+        if (event.defeated) {
+          removeCardByInstanceId(opponent.board, event.targetInstanceId);
+          moveCardToDiscardForOwner(state, target, event.targetPlayerIndex);
+        } else if (target.vida <= 0) {
+          return { ok: false, code: "attack-unit-defeat-mismatch", message: "O replay derrotou a unidade, mas o evento nao marcou derrota." };
+        }
+
+        return { ok: true };
+      }
+
+      case LOG_EVENT_TYPES.ENTER_DEFENSE: {
+        if (!player || state.currentPlayerIndex !== event.playerIndex) {
+          return { ok: false, code: "invalid-enter-defense-player", message: "O replay nao encontrou o jogador correto para entrar em defesa." };
+        }
+
+        const unit = findCardByInstanceId(player.board, event.unitInstanceId);
+        if (!unit || !canUnitEnterDefense(state, event.playerIndex, unit)) {
+          return { ok: false, code: "invalid-enter-defense-state", message: "A unidade nao pode entrar em defesa no replay." };
+        }
+
+        state.selectedAttackerId = null;
+        unit.isDefending = true;
+        unit.defenseTurnNumber = state.turnNumber;
+        unit.jaAtacouNoTurno = true;
+        return { ok: true };
+      }
+
+      case LOG_EVENT_TYPES.CANCEL_DEFENSE: {
+        if (!player || state.currentPlayerIndex !== event.playerIndex) {
+          return { ok: false, code: "invalid-cancel-defense-player", message: "O replay nao encontrou o jogador correto para cancelar a defesa." };
+        }
+
+        const unit = findCardByInstanceId(player.board, event.unitInstanceId);
+        if (!unit || !canUnitCancelDefense(state, event.playerIndex, unit)) {
+          return { ok: false, code: "invalid-cancel-defense-state", message: "A unidade nao pode cancelar a defesa no replay." };
+        }
+
+        unit.isDefending = false;
+        unit.defenseTurnNumber = null;
+        unit.jaAtacouNoTurno = false;
+        unit.podeAgir = true;
+        return { ok: true };
+      }
+
+      case LOG_EVENT_TYPES.SUPPORT_HEAL: {
+        if (!player || state.currentPlayerIndex !== event.playerIndex) {
+          return { ok: false, code: "invalid-support-heal-player", message: "O replay nao encontrou o jogador correto para a cura de suporte." };
+        }
+
+        const healAmount = getSupportBonus(player, "cura_fim_turno");
+        const expectedRecovered = Math.min(healAmount, MAX_HEALTH - player.vida);
+        if (expectedRecovered !== event.recovered) {
+          return { ok: false, code: "support-heal-mismatch", message: "A cura de suporte registrada nao bate com o valor calculado no replay." };
+        }
+
+        player.vida = Math.min(player.vida + healAmount, MAX_HEALTH);
+        return { ok: true };
+      }
+
+      case LOG_EVENT_TYPES.VICTORY: {
+        const winnerIndex = getPlayerIndexById(state, event.winnerPlayerId);
+        if (winnerIndex === -1) {
+          return { ok: false, code: "invalid-victory-player", message: "O evento de vitoria referencia um jogador inexistente." };
+        }
+
+        state.winner = state.players[winnerIndex];
+        state.isWinnerModalOpen = true;
+        return { ok: true };
+      }
+
+      default:
+        return { ok: false, code: "unknown-event-kind", message: `Tipo de evento desconhecido: ${event.kind}.` };
+    }
+  }
+
+  function validateMatchLog(logEntries) {
+    const issues = [];
+
+    if (!Array.isArray(logEntries) || !logEntries.length) {
+      return {
+        status: LOG_VALIDATION_STATUS.IDLE,
+        validatedEntryCount: 0,
+        issues
+      };
+    }
+
+    const seenIds = new Set();
+    let expectedNumber = 1;
+
+    logEntries.forEach((entry) => {
+      if (!entry) {
+        issues.push(createValidationIssue(null, "missing-entry", "Existe uma linha vazia no log."));
+        expectedNumber += 1;
+        return;
+      }
+
+      if (seenIds.has(entry.id)) {
+        issues.push(createValidationIssue(entry, "duplicate-id", `A linha ${entry.numero} reutiliza um id ja existente.`));
+      }
+      seenIds.add(entry.id);
+
+      if (entry.numero !== expectedNumber) {
+        issues.push(createValidationIssue(entry, "invalid-sequence", `A numeracao esperada era ${expectedNumber}, mas a linha usa ${entry.numero}.`));
+      }
+
+      if (!entry.snapshot) {
+        issues.push(createValidationIssue(entry, "missing-snapshot", "A linha do log nao possui snapshot."));
+      }
+
+      if (!entry.event) {
+        issues.push(createValidationIssue(entry, "missing-event", "A linha do log nao possui evento estruturado."));
+      }
+
+      issues.push(...validateSnapshotIntegrity(entry.snapshot, entry));
+      expectedNumber += 1;
+    });
+
+    if (logEntries[0]?.event?.kind !== LOG_EVENT_TYPES.MATCH_START) {
+      issues.push(createValidationIssue(logEntries[0], "missing-match-start", "A primeira linha do log deveria registrar o inicio da partida."));
+    }
+
+    let validatedEntryCount = 0;
+
+    if (logEntries[0]?.snapshot) {
+      let replayState = createReplayStateFromSnapshot(logEntries[0].snapshot);
+      validatedEntryCount = 1;
+
+      for (let entryIndex = 1; entryIndex < logEntries.length; entryIndex += 1) {
+        const entry = logEntries[entryIndex];
+        if (!entry?.snapshot || !entry?.event) {
+          continue;
+        }
+
+        let workingState = createReplayStateFromSnapshot(createStateSnapshot(replayState));
+        let matched = false;
+        let lastApplyError = null;
+        const maxSilentTransitions = 32;
+
+        for (let silentTransitions = 0; silentTransitions <= maxSilentTransitions; silentTransitions += 1) {
+          if (silentTransitions > 0) {
+            const advanced = applySilentReplayTurnTransition(workingState);
+            if (!advanced) {
+              break;
+            }
+          }
+
+          const attemptState = createReplayStateFromSnapshot(createStateSnapshot(workingState));
+          const applyResult = applyLoggedEvent(attemptState, entry.event);
+
+          if (!applyResult.ok) {
+            lastApplyError = applyResult;
+            continue;
+          }
+
+          if (getSnapshotSignature(createStateSnapshot(attemptState)) === getSnapshotSignature(entry.snapshot)) {
+            replayState = attemptState;
+            validatedEntryCount = entryIndex + 1;
+            matched = true;
+            break;
+          }
+
+          lastApplyError = {
+            code: "snapshot-mismatch",
+            message: "O evento foi reaplicado, mas o snapshot reconstruido nao bate com o snapshot salvo."
+          };
+        }
+
+        if (!matched) {
+          issues.push(createValidationIssue(
+            entry,
+            lastApplyError?.code || "replay-failed",
+            lastApplyError?.message || "Nao foi possivel reproduzir esta linha do log a partir da linha anterior."
+          ));
+        }
+      }
+    }
+
+    return {
+      status: issues.length ? LOG_VALIDATION_STATUS.INVALID : LOG_VALIDATION_STATUS.VALID,
+      validatedEntryCount,
+      issues
+    };
   }
 
   function rewindToLogEntry(state, entryId) {
@@ -1041,7 +1732,11 @@
     player.hand.push(card);
 
     if (shouldLog) {
-      addLog(state, `${player.nome} comprou ${card.nome}.`);
+      addLog(state, `${player.nome} comprou ${card.nome}.`, {
+        kind: LOG_EVENT_TYPES.DRAW_CARD,
+        playerIndex,
+        cardInstanceId: card.instanceId
+      });
     }
 
     return card;
@@ -1079,7 +1774,13 @@
 
   function resolveDamageEffectOnPlayer(state, card, player, opponent) {
     opponent.vida = Math.max(opponent.vida - card.valor, 0);
-    addLog(state, `${player.nome} usou ${card.nome} e causou ${card.valor} de dano em ${opponent.nome}.`);
+    addLog(state, `${player.nome} usou ${card.nome} e causou ${card.valor} de dano em ${opponent.nome}.`, {
+      kind: LOG_EVENT_TYPES.EFFECT_DAMAGE_PLAYER,
+      playerIndex: state.currentPlayerIndex,
+      cardInstanceId: card.instanceId,
+      targetPlayerIndex: state.players.findIndex((targetPlayer) => targetPlayer.id === opponent.id),
+      damage: card.valor
+    });
   }
 
   function resolveDamageEffectOnUnit(state, card, player, opponent, targetInstanceId) {
@@ -1096,12 +1797,27 @@
     if (target.vida <= 0) {
       const [defeatedUnit] = opponent.board.splice(targetIndex, 1);
       moveCardToDiscardForOwner(state, defeatedUnit, (state.currentPlayerIndex + 1) % 2);
-      addLog(state, `${player.nome} usou ${card.nome} e causou ${inflictedDamage} de dano em ${target.nome}.`);
-      addLog(state, `${defeatedUnit.nome} foi derrotada e enviada ao descarte.`);
+      addLog(state, `${player.nome} usou ${card.nome} e causou ${inflictedDamage} de dano em ${target.nome}, derrotando a unidade.`, {
+        kind: LOG_EVENT_TYPES.EFFECT_DAMAGE_UNIT,
+        playerIndex: state.currentPlayerIndex,
+        cardInstanceId: card.instanceId,
+        targetPlayerIndex: (state.currentPlayerIndex + 1) % 2,
+        targetInstanceId: target.instanceId,
+        damage: inflictedDamage,
+        defeated: true
+      });
       return true;
     }
 
-    addLog(state, `${player.nome} usou ${card.nome} e causou ${inflictedDamage} de dano em ${target.nome}.`);
+    addLog(state, `${player.nome} usou ${card.nome} e causou ${inflictedDamage} de dano em ${target.nome}.`, {
+      kind: LOG_EVENT_TYPES.EFFECT_DAMAGE_UNIT,
+      playerIndex: state.currentPlayerIndex,
+      cardInstanceId: card.instanceId,
+      targetPlayerIndex: (state.currentPlayerIndex + 1) % 2,
+      targetInstanceId: target.instanceId,
+      damage: inflictedDamage,
+      defeated: false
+    });
     return true;
   }
 
@@ -1112,7 +1828,13 @@
 
     const recovered = Math.min(card.valor, MAX_HEALTH - player.vida);
     player.vida = Math.min(player.vida + card.valor, MAX_HEALTH);
-    addLog(state, `${player.nome} usou ${card.nome} e recuperou ${recovered} de vida.`);
+    addLog(state, `${player.nome} usou ${card.nome} e recuperou ${recovered} de vida.`, {
+      kind: LOG_EVENT_TYPES.EFFECT_HEAL_PLAYER,
+      playerIndex: state.currentPlayerIndex,
+      cardInstanceId: card.instanceId,
+      targetPlayerIndex: state.currentPlayerIndex,
+      recovered
+    });
     return true;
   }
 
@@ -1129,7 +1851,14 @@
 
     const recovered = Math.min(card.valor, target.vidaBase - target.vida);
     target.vida = Math.min(target.vida + card.valor, target.vidaBase);
-    addLog(state, `${player.nome} usou ${card.nome} e recuperou ${recovered} de vida em ${target.nome}.`);
+    addLog(state, `${player.nome} usou ${card.nome} e recuperou ${recovered} de vida em ${target.nome}.`, {
+      kind: LOG_EVENT_TYPES.EFFECT_HEAL_UNIT,
+      playerIndex: state.currentPlayerIndex,
+      cardInstanceId: card.instanceId,
+      targetPlayerIndex: state.currentPlayerIndex,
+      targetInstanceId: target.instanceId,
+      recovered
+    });
     return true;
   }
 
@@ -1205,7 +1934,11 @@
         isDefending: false,
         defenseTurnNumber: null
       });
-      addLog(state, `${player.nome} baixou ${card.nome} no campo por ${card.custo} mana.`);
+      addLog(state, `${player.nome} baixou ${card.nome} no campo por ${card.custo} mana.`, {
+        kind: LOG_EVENT_TYPES.PLAY_UNIT,
+        playerIndex,
+        cardInstanceId: card.instanceId
+      });
       return true;
     }
 
@@ -1214,7 +1947,11 @@
         ...card,
         estado: "suporte"
       });
-      addLog(state, `${player.nome} ativou o suporte ${card.nome} por ${card.custo} mana.`);
+      addLog(state, `${player.nome} ativou o suporte ${card.nome} por ${card.custo} mana.`, {
+        kind: LOG_EVENT_TYPES.PLAY_SUPPORT,
+        playerIndex,
+        cardInstanceId: card.instanceId
+      });
       return true;
     }
 
@@ -1273,7 +2010,13 @@
 
     if (targetType === "player") {
       opponent.vida = Math.max(opponent.vida - attackValue, 0);
-      addLog(state, `${attacker.nome} atacou ${opponent.nome} e causou ${attackValue} de dano.`);
+      addLog(state, `${attacker.nome} atacou ${opponent.nome} e causou ${attackValue} de dano.`, {
+        kind: LOG_EVENT_TYPES.ATTACK_PLAYER,
+        playerIndex,
+        attackerInstanceId: attacker.instanceId,
+        targetPlayerIndex: (playerIndex + 1) % 2,
+        damage: attackValue
+      });
       checkWinner(state);
       return true;
     }
@@ -1293,7 +2036,13 @@
 
       const [defeatedSupport] = opponent.supportZone.splice(targetIndex, 1);
       moveCardToDiscardForOwner(state, defeatedSupport, (playerIndex + 1) % 2);
-      addLog(state, `${attacker.nome} destruiu o suporte ${defeatedSupport.nome}.`);
+      addLog(state, `${attacker.nome} destruiu o suporte ${defeatedSupport.nome}.`, {
+        kind: LOG_EVENT_TYPES.ATTACK_SUPPORT,
+        playerIndex,
+        attackerInstanceId: attacker.instanceId,
+        targetPlayerIndex: (playerIndex + 1) % 2,
+        targetInstanceId: defeatedSupport.instanceId
+      });
       return true;
     }
 
@@ -1311,12 +2060,27 @@
     if (target.vida <= 0) {
       const [defeatedUnit] = opponent.board.splice(targetIndex, 1);
       moveCardToDiscardForOwner(state, defeatedUnit, (playerIndex + 1) % 2);
-      addLog(state, `${attacker.nome} atacou ${target.nome} e causou ${inflictedDamage} de dano.`);
-      addLog(state, `${defeatedUnit.nome} foi derrotada e enviada ao descarte.`);
+      addLog(state, `${attacker.nome} atacou ${target.nome}, causou ${inflictedDamage} de dano e derrotou a unidade.`, {
+        kind: LOG_EVENT_TYPES.ATTACK_UNIT,
+        playerIndex,
+        attackerInstanceId: attacker.instanceId,
+        targetPlayerIndex: (playerIndex + 1) % 2,
+        targetInstanceId: target.instanceId,
+        damage: inflictedDamage,
+        defeated: true
+      });
       return true;
     }
 
-    addLog(state, `${attacker.nome} atacou ${target.nome} e causou ${inflictedDamage} de dano.`);
+    addLog(state, `${attacker.nome} atacou ${target.nome} e causou ${inflictedDamage} de dano.`, {
+      kind: LOG_EVENT_TYPES.ATTACK_UNIT,
+      playerIndex,
+      attackerInstanceId: attacker.instanceId,
+      targetPlayerIndex: (playerIndex + 1) % 2,
+      targetInstanceId: target.instanceId,
+      damage: inflictedDamage,
+      defeated: false
+    });
     return true;
   }
 
@@ -1332,7 +2096,11 @@
     unit.isDefending = true;
     unit.defenseTurnNumber = state.turnNumber;
     unit.jaAtacouNoTurno = true;
-    addLog(state, `${player.nome} colocou ${unit.nome} em defesa.`);
+    addLog(state, `${player.nome} colocou ${unit.nome} em defesa.`, {
+      kind: LOG_EVENT_TYPES.ENTER_DEFENSE,
+      playerIndex,
+      unitInstanceId: unit.instanceId
+    });
     return true;
   }
 
@@ -1348,7 +2116,11 @@
     unit.defenseTurnNumber = null;
     unit.jaAtacouNoTurno = false;
     unit.podeAgir = true;
-    addLog(state, `${player.nome} cancelou a defesa de ${unit.nome}.`);
+    addLog(state, `${player.nome} cancelou a defesa de ${unit.nome}.`, {
+      kind: LOG_EVENT_TYPES.CANCEL_DEFENSE,
+      playerIndex,
+      unitInstanceId: unit.instanceId
+    });
     return true;
   }
 
@@ -1516,7 +2288,11 @@
     player.vida = Math.min(player.vida + healAmount, MAX_HEALTH);
 
     if (recovered > 0) {
-      addLog(state, `${player.nome} recuperou ${recovered} de vida com seus suportes.`);
+      addLog(state, `${player.nome} recuperou ${recovered} de vida com seus suportes.`, {
+        kind: LOG_EVENT_TYPES.SUPPORT_HEAL,
+        playerIndex: state.currentPlayerIndex,
+        recovered
+      });
     }
   }
 
@@ -1575,8 +2351,11 @@
     state.winner = state.players.find((player) => player.id !== defeated.id) || null;
 
     if (state.winner) {
-      addLog(state, `${state.winner.nome} venceu a partida.`);
       state.isWinnerModalOpen = true;
+      addLog(state, `${state.winner.nome} venceu a partida.`, {
+        kind: LOG_EVENT_TYPES.VICTORY,
+        winnerPlayerId: state.winner.id
+      });
     }
 
     return state.winner;
@@ -1969,6 +2748,84 @@
 
   function getDisplayLogEntries(logEntries) {
     return [...logEntries].reverse();
+  }
+
+  function getLogValidationStatusLabel(state) {
+    if (state.logValidationStatus === LOG_VALIDATION_STATUS.VALID) {
+      return `Log valido (${state.validatedEntryCount})`;
+    }
+
+    if (state.logValidationStatus === LOG_VALIDATION_STATUS.INVALID) {
+      return `${state.logValidationIssues.length} problema(s)`;
+    }
+
+    return "Nao validado";
+  }
+
+  function renderLogValidation(state) {
+    const validateButton = document.getElementById("validate-log-button");
+    const statusElement = document.getElementById("log-validation-status");
+    const resultsElement = document.getElementById("log-validation-results");
+
+    if (!validateButton || !statusElement || !resultsElement) {
+      return;
+    }
+
+    validateButton.disabled = !state.log.length;
+
+    const statusClassName = state.logValidationStatus === LOG_VALIDATION_STATUS.VALID
+      ? "log-validation-chip status-valid"
+      : state.logValidationStatus === LOG_VALIDATION_STATUS.INVALID
+        ? "log-validation-chip status-invalid"
+        : "log-validation-chip";
+    statusElement.className = statusClassName;
+    statusElement.textContent = getLogValidationStatusLabel(state);
+
+    if (state.logValidationStatus === LOG_VALIDATION_STATUS.IDLE) {
+      resultsElement.hidden = false;
+      resultsElement.innerHTML = `<div class="log-validation-summary">O log ainda nao foi validado nesta versao da partida.</div>`;
+      return;
+    }
+
+    resultsElement.hidden = false;
+
+    if (state.logValidationStatus === LOG_VALIDATION_STATUS.VALID) {
+      resultsElement.innerHTML = `
+        <div class="log-validation-summary">
+          Replay concluido com sucesso. ${state.validatedEntryCount} acao(oes) foram verificadas sem divergencias.
+        </div>
+      `;
+      return;
+    }
+
+    resultsElement.innerHTML = "";
+
+    const summary = document.createElement("div");
+    summary.className = "log-validation-summary";
+    summary.textContent = `Foram encontrados ${state.logValidationIssues.length} problema(s) apos validar ${state.validatedEntryCount} acao(oes). Clique em um problema para focar a linha correspondente.`;
+    resultsElement.appendChild(summary);
+
+    const issuesList = document.createElement("div");
+    issuesList.className = "log-validation-issues";
+
+    state.logValidationIssues.forEach((issue) => {
+      const issueButton = document.createElement("button");
+      issueButton.type = "button";
+      issueButton.className = "log-validation-issue";
+      issueButton.innerHTML = `
+        <span class="log-validation-issue-code">${issue.numero ? `Acao ${issue.numero}` : "Log"} · ${issue.code}</span>
+        <span class="log-validation-issue-text">${issue.message}</span>
+      `;
+      issueButton.addEventListener("click", () => {
+        if (issue.entryId != null) {
+          state.selectedLogEntryId = issue.entryId;
+          render(state);
+        }
+      });
+      issuesList.appendChild(issueButton);
+    });
+
+    resultsElement.appendChild(issuesList);
   }
 
   function getSelectedLogEntry(state) {
@@ -2467,6 +3324,7 @@
       });
     }
 
+    renderLogValidation(state);
     renderLibrary(renderedState);
 
     document.getElementById("player-bottom-panel").classList.toggle("active", matchStarted && renderedState.currentPlayerIndex === 0 && !renderedState.winner);
@@ -2509,6 +3367,14 @@
       if (!gameState.isLogOpen) {
         gameState.selectedLogEntryId = null;
       }
+      render(gameState);
+    });
+
+    document.getElementById("validate-log-button").addEventListener("click", () => {
+      const validationResult = validateMatchLog(gameState.log);
+      gameState.logValidationStatus = validationResult.status;
+      gameState.validatedEntryCount = validationResult.validatedEntryCount;
+      gameState.logValidationIssues = validationResult.issues;
       render(gameState);
     });
 
@@ -2623,6 +3489,8 @@
       AI_STEP_DELAY_MS,
       DECK_MODES,
       PLAYER_CONTROLLER_TYPES,
+      LOG_VALIDATION_STATUS,
+      LOG_EVENT_TYPES,
       CARD_LIBRARY,
       getSessionPlayerControllers,
       setSessionPlayerController,
@@ -2657,6 +3525,8 @@
       isAiControlledPlayer,
       isAiTurnActive,
       createStateSnapshot,
+      validateMatchLog,
+      applyLoggedEvent,
       restoreStateFromSnapshot,
       rewindToLogEntry,
       attemptRewindToLogEntry,

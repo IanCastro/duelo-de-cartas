@@ -267,6 +267,7 @@
           <p>Unidades prontas podem entrar em defesa pelo botao de escudo na propria carta. Em defesa, a carta fica deitada, recebe metade do dano arredondado para cima e pode cancelar essa defesa apenas no mesmo turno em que entrou nela.</p>
           <p>Cada unidade pode atacar no turno em que entra em campo e depois 1 vez por turno. Se o rival nao tiver unidades em campo, voce pode destruir um suporte com 1 ataque. Reparo Rapido so pode curar alvos feridos.</p>
           <p>No Log, clique em uma linha para ver aquele momento antigo no tabuleiro em modo somente leitura. Clique novamente na mesma linha para voltar para aquele momento com confirmacao, ou clique na linha mais recente ou pressione Esc para voltar ao presente.</p>
+          <p>Use o botao Validar log no proprio menu de Log para rodar um replay completo e verificar se o historico da partida ficou consistente.</p>
         </section>
 
         <section class="side-panel log-panel" id="log-panel" aria-hidden="true">
@@ -274,7 +275,12 @@
             <span>Log da partida</span>
             <span id="winner-banner">Sem vencedor</span>
           </div>
+          <div class="log-validation-toolbar">
+            <button id="validate-log-button" class="action-button secondary" type="button">Validar log</button>
+            <span id="log-validation-status" class="log-validation-chip">Nao validado</span>
+          </div>
           <div id="game-log"></div>
+          <div id="log-validation-results" class="log-validation-results" hidden aria-live="polite"></div>
         </section>
       </aside>
     </section>

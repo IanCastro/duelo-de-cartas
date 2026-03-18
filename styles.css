@@ -554,17 +554,110 @@ select {
 .log-panel {
   display: flex;
   flex-direction: column;
+  gap: 12px;
 }
 
 #game-log {
-  margin: 14px 0 0;
   display: flex;
   flex-direction: column;
   gap: 8px;
   color: var(--muted);
-  height: clamp(420px, 60vh, 620px);
+  flex: 1 1 auto;
+  min-height: 260px;
+  max-height: clamp(420px, 60vh, 620px);
   overflow-y: auto;
   padding-right: 4px;
+}
+
+.log-validation-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.log-validation-chip {
+  display: inline-flex;
+  align-items: center;
+  min-height: 34px;
+  padding: 6px 12px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--muted);
+  font-size: 0.84rem;
+  font-weight: 700;
+}
+
+.log-validation-chip.status-valid {
+  border-color: rgba(127, 231, 195, 0.38);
+  background: rgba(127, 231, 195, 0.12);
+  color: var(--success);
+}
+
+.log-validation-chip.status-invalid {
+  border-color: rgba(255, 122, 122, 0.42);
+  background: rgba(255, 122, 122, 0.1);
+  color: #ff9b9b;
+}
+
+.log-validation-results {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  border-radius: 18px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.log-validation-summary {
+  color: var(--text);
+  font-size: 0.9rem;
+  line-height: 1.45;
+}
+
+.log-validation-issues {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 220px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.log-validation-issue {
+  width: 100%;
+  padding: 10px 12px;
+  border-radius: 14px;
+  border: 1px solid rgba(255, 122, 122, 0.22);
+  background: rgba(255, 122, 122, 0.08);
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 150ms ease, transform 150ms ease;
+}
+
+.log-validation-issue:hover {
+  transform: translateY(-1px);
+  border-color: rgba(255, 122, 122, 0.45);
+}
+
+.log-validation-issue-code {
+  display: block;
+  color: #ff9b9b;
+  font-size: 0.76rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.log-validation-issue-text {
+  display: block;
+  margin-top: 4px;
+  color: var(--muted);
+  line-height: 1.45;
 }
 
 #winner-banner {

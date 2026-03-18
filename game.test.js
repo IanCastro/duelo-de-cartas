@@ -67,6 +67,7 @@ test("start builds the initial match from the configured players", () => {
   assert(state.log.length === 1, "log should start with the initial setup entry");
   assert(state.log[0].numero === 1, "first log line should start at action 1");
   assert(state.log[0].texto.includes("Partida iniciada"), "first log line should describe the start of the match");
+  assert(state.log[0].event.kind === game.LOG_EVENT_TYPES.MATCH_START, "first log line should carry a structured match-start event");
 });
 
 test("session player controllers control how new matches start", () => {
@@ -1085,6 +1086,8 @@ test("attack against a unit deals damage and discards it if defeated", () => {
   assert(attacked === true, "attack should resolve");
   assert(state.players[1].board.length === 0, "defeated unit should leave the board");
   assert(state.discardPile.length === 1, "defeated unit should go to discard");
+  assert(state.log[state.log.length - 1].texto.includes("derrotou a unidade"), "lethal combat should be recorded in a single log line");
+  assert(state.log[state.log.length - 1].event.defeated === true, "lethal combat event should mark the defeated unit");
 });
 
 test("unit can attack an enemy support only when there are no enemy units in play", () => {
@@ -1233,6 +1236,8 @@ test("direct damage can hit an enemy unit and discard it if defeated", () => {
   assert(resolved === true, "direct damage should resolve on enemy unit");
   assert(state.players[1].board.length === 0, "enemy unit should be removed");
   assert(state.discardPile.length === 2, "effect and defeated unit should go to discard");
+  assert(state.log[state.log.length - 1].texto.includes("derrotando a unidade"), "lethal direct damage should stay in a single log line");
+  assert(state.log[state.log.length - 1].event.defeated === true, "lethal direct damage event should mark the defeated unit");
 });
 
 test("direct damage cannot target allied units", () => {
@@ -1353,6 +1358,8 @@ test("layout markup removes the cancel button and keeps a pending effect slot", 
   assert(html.includes("id=\"deck-mode-shared\""), "the config panel should expose a shared-deck toggle");
   assert(html.includes("id=\"start-button\""), "the config panel should expose a Start button for the pre-game");
   assert(html.includes("id=\"player-1-deck-stat\""), "player panels should expose per-player deck stats");
+  assert(html.includes("id=\"validate-log-button\""), "the log panel should expose a manual validation button");
+  assert(html.includes("id=\"log-validation-status\""), "the log panel should expose a validation status chip");
   assert(html.includes("compact-action-button"), "turn action buttons should use the compact button style");
   assert(html.includes("pressione Esc para voltar ao presente"), "rules should describe how to leave history view without dedicated buttons");
   assert(html.includes("so comeca quando voce clicar em Start"), "rules should describe the pre-game Start flow");
@@ -1360,6 +1367,7 @@ test("layout markup removes the cancel button and keeps a pending effect slot", 
   assert(html.includes("default e Separado"), "rules should describe the default separate deck mode");
   assert(html.includes("carta fica deitada"), "rules should describe the defense stance visuals");
   assert(html.includes("IA vs IA"), "rules should describe how to configure ai vs ai");
+  assert(html.includes("Validar log"), "rules should mention the manual log validation flow");
 });
 
 test("estandarte de guerra now costs 5 mana", () => {
@@ -1668,6 +1676,82 @@ test("log entries stay chronological and snapshots allow rewind", () => {
   assert(rewound.players[0].hand.length === initialHandSize, "rewind should restore the original hand size");
   assert(rewound.log.length === 1, "rewind should discard future log entries");
   assert(rewound.nextLogNumber === 2, "rewind should continue numbering from the restored point");
+  assert(state.log[1].event.kind === game.LOG_EVENT_TYPES.DRAW_CARD, "logged draw actions should keep a structured event payload");
+});
+
+test("log validator passes on a normal match history in separate deck mode", () => {
+  const state = createStartedState();
+  Object.assign(state.players[0].hand[0], {
+    id: "unit-1",
+    nome: "Escudeiro Solar",
+    categoria: "unidade",
+    custo: 2,
+    ataque: 2,
+    vida: 5,
+    vidaBase: 5,
+    descricao: ""
+  });
+  Object.assign(state.log[0].snapshot.players[0].hand[0], {
+    id: "unit-1",
+    nome: "Escudeiro Solar",
+    categoria: "unidade",
+    custo: 2,
+    ataque: 2,
+    vida: 5,
+    vidaBase: 5,
+    descricao: ""
+  });
+
+  const unitInstanceId = state.players[0].hand[0].instanceId;
+  game.endTurn(state);
+  game.endTurn(state);
+  game.playCard(state, 0, unitInstanceId);
+  game.enterDefenseMode(state, 0, unitInstanceId);
+
+  const result = game.validateMatchLog(state.log);
+
+  assert(result.status === game.LOG_VALIDATION_STATUS.VALID, "normal separate-deck histories should validate successfully");
+  assert(result.issues.length === 0, "valid histories should not produce issues");
+  assert(result.validatedEntryCount === state.log.length, "valid histories should validate every log line");
+});
+
+test("log validator also passes on shared deck mode", () => {
+  const state = createStartedState({ deckMode: game.DECK_MODES.SHARED });
+  game.drawTurnCard(state, 0);
+
+  const result = game.validateMatchLog(state.log);
+
+  assert(result.status === game.LOG_VALIDATION_STATUS.VALID, "shared-deck histories should also validate successfully");
+  assert(result.validatedEntryCount === state.log.length, "shared-deck validation should cover every line");
+});
+
+test("log validator reports tampered snapshots", () => {
+  const state = createStartedState();
+  state.players[0].manaAtual = 2;
+  state.players[0].manaMax = 2;
+  game.drawTurnCard(state, 0);
+  state.log[1].snapshot.players[0].hand.pop();
+
+  const result = game.validateMatchLog(state.log);
+
+  assert(result.status === game.LOG_VALIDATION_STATUS.INVALID, "tampered histories should fail validation");
+  assert(result.issues.some((issue) => issue.numero === 2), "the validator should point to the broken line");
+});
+
+test("new log entries reset the validation status to idle", () => {
+  const state = createStartedState();
+  let result = game.validateMatchLog(state.log);
+  state.logValidationStatus = result.status;
+  state.validatedEntryCount = result.validatedEntryCount;
+  state.logValidationIssues = result.issues;
+
+  state.players[0].manaAtual = 2;
+  state.players[0].manaMax = 2;
+  game.drawTurnCard(state, 0);
+
+  assert(state.logValidationStatus === game.LOG_VALIDATION_STATUS.IDLE, "any new log entry should invalidate the previous validation result");
+  assert(state.validatedEntryCount === 0, "new log entries should clear the validated entry count");
+  assert(state.logValidationIssues.length === 0, "new log entries should clear previous validation issues");
 });
 
 test("attempting to rewind depends on confirmation", () => {
