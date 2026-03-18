@@ -14,7 +14,15 @@ Se preferir, voce tambem pode servir a pasta com qualquer servidor estatico loca
 
 Os testes ficam em [game.test.js](./game.test.js) e sao executados com `Node.js`, sem `package.json` e sem runner externo.
 
-No PowerShell, rode:
+O jeito mais simples de rodar tudo e usar:
+
+```powershell
+.\run-tests.bat
+```
+
+Esse script retorna codigo de erro diferente de zero quando a suite falha.
+
+Se quiser rodar o comando bruto, use:
 
 ```powershell
 $game = Get-Content .\game.js -Raw
