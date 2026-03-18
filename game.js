@@ -226,6 +226,7 @@
       playerControllers: getSessionPlayerControllers(),
       deckMode: getSessionDeckMode(),
       isMatchStarted: false,
+      isAiVsAiPaused: false,
       isAiTurnInProgress: false,
       aiStepText: null,
       isLibraryOpen: false,
@@ -464,6 +465,7 @@
       playerControllers: normalizePlayerControllers(snapshot.playerControllers),
       deckMode: normalizeDeckMode(snapshot.deckMode),
       isMatchStarted: Boolean(snapshot.isMatchStarted),
+      isAiVsAiPaused: false,
       isAiTurnInProgress: false,
       aiStepText: null,
       isLibraryOpen: snapshot.isLibraryOpen,
@@ -1215,12 +1217,36 @@
     return controllers[playerIndex] === PLAYER_CONTROLLER_TYPES.AI;
   }
 
+  function isAiVsAiMatch(state) {
+    return Boolean(
+      state
+      && state.isMatchStarted
+      && isAiControlledPlayer(state, 0)
+      && isAiControlledPlayer(state, 1)
+    );
+  }
+
+  function toggleAiVsAiPause(state) {
+    if (!isAiVsAiMatch(state) || state.winner) {
+      return false;
+    }
+
+    state.isAiVsAiPaused = !state.isAiVsAiPaused;
+    if (!state.isAiVsAiPaused) {
+      state.aiStepText = "IA retomou a partida.";
+    } else {
+      state.isAiTurnInProgress = false;
+      state.aiStepText = "IA x IA pausado.";
+    }
+    return true;
+  }
+
   function isAiTurnActive(state) {
     return Boolean(state && state.isMatchStarted && !state.winner && isAiControlledPlayer(state, state.currentPlayerIndex));
   }
 
   function shouldRunAi(state) {
-    return isAiTurnActive(state) && !isViewingHistory(state);
+    return isAiTurnActive(state) && !isViewingHistory(state) && !state.isAiVsAiPaused;
   }
 
   function cancelAiTurn(state = null) {
@@ -3133,6 +3159,8 @@
       ? "Configure Jogador 1 e Jogador 2 como Humano ou IA e pressione Start para iniciar a partida."
       : state.winner
       ? "A partida terminou. Inicie uma nova partida para jogar novamente."
+      : isAiVsAiMatch(state) && state.isAiVsAiPaused
+      ? "IA x IA pausado. Use o botao de continuar para retomar a partida automatica."
       : aiTurnActive
       ? (state.aiStepText || "IA avaliando o campo.")
       : state.selectedEffectCard
@@ -3159,6 +3187,8 @@
     const toggleLogButton = document.getElementById("toggle-log-button");
     const startButton = document.getElementById("start-button");
     const restartButton = document.getElementById("restart-button");
+    const aiMatchControls = document.getElementById("ai-match-controls");
+    const toggleAiMatchButton = document.getElementById("toggle-ai-match-button");
     const sharedDeckButton = document.getElementById("deck-mode-shared");
     const separateDeckButton = document.getElementById("deck-mode-separate");
     const configPanel = document.getElementById("match-config-panel");
@@ -3209,6 +3239,13 @@
     if (restartButton) {
       restartButton.hidden = !state.isMatchStarted;
       restartButton.disabled = !state.isMatchStarted;
+    }
+
+    if (aiMatchControls && toggleAiMatchButton) {
+      const showAiMatchControls = isAiVsAiMatch(state) && !viewingHistory && !state.winner;
+      aiMatchControls.hidden = !showAiMatchControls;
+      toggleAiMatchButton.textContent = state.isAiVsAiPaused ? "Continuar IA x IA" : "Pausar IA x IA";
+      toggleAiMatchButton.setAttribute("aria-pressed", String(state.isAiVsAiPaused));
     }
 
     if (sharedDeckButton) {
@@ -3378,6 +3415,12 @@
       render(gameState);
     });
 
+    document.getElementById("toggle-ai-match-button").addEventListener("click", () => {
+      if (toggleAiVsAiPause(gameState)) {
+        render(gameState);
+      }
+    });
+
     document.querySelectorAll("[data-controller-button]").forEach((button) => {
       button.addEventListener("click", () => {
         if (gameState.isMatchStarted) {
@@ -3523,6 +3566,8 @@
       toggleExclusiveSidePanel,
       isAiEnabled,
       isAiControlledPlayer,
+      isAiVsAiMatch,
+      toggleAiVsAiPause,
       isAiTurnActive,
       createStateSnapshot,
       validateMatchLog,

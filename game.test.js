@@ -168,6 +168,35 @@ test("starting with both players as ai enables ai vs ai", () => {
   assert(game.isAiControlledPlayer(startedState, 0) === true, "player 1 should be ai-controlled");
   assert(game.isAiControlledPlayer(startedState, 1) === true, "player 2 should be ai-controlled");
   assert(game.isAiEnabled(startedState) === true, "ai should stay enabled when both players are configured as ai");
+  assert(game.isAiVsAiMatch(startedState) === true, "two ai controllers should be recognized as an ai-vs-ai match");
+});
+
+test("ai vs ai can be paused and resumed", () => {
+  const state = createStartedState([game.PLAYER_CONTROLLER_TYPES.AI, game.PLAYER_CONTROLLER_TYPES.AI]);
+
+  assert(game.isAiTurnActive(state) === true, "ai vs ai should start on an ai turn");
+
+  const paused = game.toggleAiVsAiPause(state);
+  assert(paused === true, "ai vs ai pause toggle should succeed during an active ai-vs-ai match");
+  assert(state.isAiVsAiPaused === true, "pause toggle should mark the match as paused");
+  assert(state.aiStepText === "IA x IA pausado.", "pausing should expose a clear paused status");
+
+  const actionWhilePaused = game.getNextAiAction(state);
+  assert(actionWhilePaused === null, "paused ai-vs-ai should stop producing automatic actions");
+
+  const resumed = game.toggleAiVsAiPause(state);
+  assert(resumed === true, "ai vs ai resume toggle should succeed");
+  assert(state.isAiVsAiPaused === false, "resume should clear the paused state");
+  assert(state.aiStepText === "IA retomou a partida.", "resuming should expose a clear resume status");
+});
+
+test("pause toggle is ignored outside ai vs ai", () => {
+  const state = createStartedState([game.PLAYER_CONTROLLER_TYPES.HUMAN, game.PLAYER_CONTROLLER_TYPES.AI]);
+
+  const toggled = game.toggleAiVsAiPause(state);
+
+  assert(toggled === false, "pause toggle should do nothing when the match is not ai vs ai");
+  assert(state.isAiVsAiPaused === false, "non-ai-vs-ai matches should stay unpaused");
 });
 
 test("mana grows by turn up to the cap and refills", () => {

@@ -221,6 +221,23 @@ select {
   gap: 8px;
 }
 
+.ai-match-controls[hidden] {
+  display: none !important;
+}
+
+.ai-match-controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.ai-match-button {
+  width: auto;
+  min-width: 150px;
+  padding: 10px 14px;
+  border-radius: 14px;
+}
+
 .top-game-copy {
   display: flex;
   flex-direction: column;
