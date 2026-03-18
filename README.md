@@ -2,17 +2,17 @@
 
 Jogo de cartas local em HTML, CSS e JavaScript puro.
 
-O projeto roda direto no navegador e a regra principal fica concentrada em [game.js](/Users/Ian/Documents/Code/Card%20Game/game.js). A interface esta em [index.html](/Users/Ian/Documents/Code/Card%20Game/index.html) e [styles.css](/Users/Ian/Documents/Code/Card%20Game/styles.css).
+O projeto roda direto no navegador e a regra principal fica concentrada em [game.js](./game.js). A interface esta em [index.html](./index.html) e [styles.css](./styles.css).
 
 ## Como abrir o jogo
 
-Abra [index.html](/Users/Ian/Documents/Code/Card%20Game/index.html) no navegador.
+Abra [index.html](./index.html) no navegador.
 
 Se preferir, voce tambem pode servir a pasta com qualquer servidor estatico local, mas isso nao e obrigatorio para o funcionamento basico.
 
 ## Como rodar os testes
 
-Os testes ficam em [game.test.js](/Users/Ian/Documents/Code/Card%20Game/game.test.js) e sao executados com `Node.js`, sem `package.json` e sem runner externo.
+Os testes ficam em [game.test.js](./game.test.js) e sao executados com `Node.js`, sem `package.json` e sem runner externo.
 
 No PowerShell, rode:
 
@@ -37,8 +37,8 @@ Atualmente existem testes que falham de proposito para demonstrar:
 
 ## Estrutura principal
 
-- [index.html](/Users/Ian/Documents/Code/Card%20Game/index.html): estrutura da interface
-- [styles.css](/Users/Ian/Documents/Code/Card%20Game/styles.css): estilos do tabuleiro, cartas e menus
-- [game.js](/Users/Ian/Documents/Code/Card%20Game/game.js): regras do jogo, IA, log, rewind e renderizacao
-- [game.test.js](/Users/Ian/Documents/Code/Card%20Game/game.test.js): suite de testes
-- [TODO.md](/Users/Ian/Documents/Code/Card%20Game/TODO.md): backlog do projeto
+- [index.html](./index.html): estrutura da interface
+- [styles.css](./styles.css): estilos do tabuleiro, cartas e menus
+- [game.js](./game.js): regras do jogo, IA, log, rewind e renderizacao
+- [game.test.js](./game.test.js): suite de testes
+- [TODO.md](./TODO.md): backlog do projeto
