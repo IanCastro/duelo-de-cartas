@@ -53,6 +53,36 @@ function snapshotStateForValidation(state) {
   }));
 }
 
+function countCardInstanceOccurrences(state, instanceId) {
+  const piles = [
+    state.deck,
+    state.discardPile,
+    state.playerDecks?.[0],
+    state.playerDecks?.[1],
+    state.playerDiscardPiles?.[0],
+    state.playerDiscardPiles?.[1]
+  ];
+  let total = 0;
+
+  piles.forEach((pile) => {
+    if (Array.isArray(pile)) {
+      total += pile.filter((card) => card.instanceId === instanceId).length;
+    }
+  });
+
+  state.players.forEach((player) => {
+    total += player.hand.filter((card) => card.instanceId === instanceId).length;
+    total += player.board.filter((card) => card.instanceId === instanceId).length;
+    total += player.supportZone.filter((card) => card.instanceId === instanceId).length;
+  });
+
+  if (state.selectedEffectCard?.instanceId === instanceId) {
+    total += 1;
+  }
+
+  return total;
+}
+
 test("initial state opens in pre-game with default player controllers", () => {
   const state = game.createInitialState();
 
@@ -1669,6 +1699,33 @@ test("ending turn without actions left should not ask for confirmation", () => {
   assert(state.currentPlayerIndex === 1, "turn should pass to the next player");
 });
 
+test("ending turn with an armed effect should not lose the card", () => {
+  const state = createStartedState();
+  state.players[0].manaAtual = 2;
+  state.players[0].manaMax = 2;
+  state.players[0].hand = [{
+    id: "effect-1",
+    instanceId: "armed-effect",
+    nome: "Raio Arcano",
+    categoria: "efeito",
+    custo: 1,
+    efeito: "dano_direto",
+    valor: 3,
+    descricao: ""
+  }];
+
+  const played = game.playCard(state, 0, "armed-effect");
+  const ended = game.attemptEndTurn(state, {
+    confirmFn: () => true
+  });
+
+  assert(played === true, "effect should enter target mode before the turn-end attempt");
+  assert(ended === false, "turn should not end while an effect is still armed");
+  assert(state.currentPlayerIndex === 0, "current player should keep the turn");
+  assert(state.selectedEffectCard?.instanceId === "armed-effect", "armed effect should remain selected");
+  assert(countCardInstanceOccurrences(state, "armed-effect") === 1, "armed effect card should still exist exactly once in the full game state");
+});
+
 test("winner is detected when player health reaches zero", () => {
   const state = createStartedState();
   state.players[0].board = [{
@@ -1988,6 +2045,52 @@ test("confirmed rewind restores the selected snapshot", () => {
   assert(rewound.log.length === 1, "confirmed rewind should truncate future history");
 });
 
+test("rewind to a resolved effect entry should restore a stable post-effect state", () => {
+  const state = createStartedState();
+  state.players[0].manaAtual = 2;
+  state.players[0].manaMax = 2;
+
+  const healCard = state.players[0].hand[0];
+  Object.assign(healCard, {
+    id: "heal",
+    nome: "Reparo",
+    categoria: "efeito",
+    custo: 1,
+    efeito: "cura_direta",
+    valor: 6,
+    descricao: ""
+  });
+
+  const unitCard = state.players[0].hand.splice(1, 1)[0];
+  Object.assign(unitCard, {
+    id: "ally",
+    nome: "Aliada",
+    categoria: "unidade",
+    custo: 2,
+    ataque: 2,
+    vida: 2,
+    vidaBase: 5,
+    descricao: "",
+    estado: "campo",
+    podeAgir: true,
+    jaAtacouNoTurno: false,
+    isDefending: false,
+    defenseTurnNumber: null
+  });
+  state.players[0].board = [unitCard];
+  state.log[0].snapshot = snapshotStateForValidation(state);
+
+  game.playCard(state, 0, healCard.instanceId);
+  game.resolveEffectTarget(state, 0, "ally-unit", unitCard.instanceId);
+
+  const rewound = game.rewindToLogEntry(state, 2);
+
+  assert(rewound.selectedEffectCard === null, "rewind should not restore a resolved effect as still armed");
+  assert(game.getDiscardPileForPlayer(rewound, 0).some((card) => card.instanceId === healCard.instanceId), "resolved healing card should already be in discard after rewind");
+  assert(rewound.players[0].board[0].vida === 5, "rewind should preserve the healed unit life total");
+  assert(countCardInstanceOccurrences(rewound, healCard.instanceId) === 1, "resolved healing card should still exist exactly once after rewind");
+});
+
 test("clicking the selected log entry again rewinds after confirmation", () => {
   const state = createStartedState();
   const initialHandSize = state.players[0].hand.length;
@@ -2028,6 +2131,36 @@ test("clicking the latest log entry returns to the present moment", () => {
 
   assert(result === state, "returning to the present should keep the current state object");
   assert(state.selectedLogEntryId === null, "clicking the latest entry should leave history view and return to the present");
+});
+
+test("rewind to a lethal attack entry should preserve the winner state", () => {
+  const state = createStartedState();
+  state.players[1].vida = 2;
+  state.players[0].manaAtual = 1;
+  state.players[0].manaMax = 1;
+  Object.assign(state.players[0].hand[0], {
+    id: "atk",
+    nome: "Finalizador",
+    categoria: "unidade",
+    custo: 1,
+    ataque: 4,
+    vida: 3,
+    vidaBase: 3,
+    descricao: ""
+  });
+
+  const attackerInstanceId = state.players[0].hand[0].instanceId;
+  state.log[0].snapshot.players[1].vida = 2;
+
+  game.playCard(state, 0, attackerInstanceId);
+  game.selectAttacker(state, 0, attackerInstanceId);
+  game.attackTarget(state, 0, "player");
+
+  const rewound = game.rewindToLogEntry(state, 3);
+
+  assert(rewound.players[1].vida === 0, "rewind should keep the defeated player at zero life on the lethal attack line");
+  assert(rewound.winner && rewound.winner.id === 1, "rewind should preserve the declared winner on the lethal attack line");
+  assert(rewound.isWinnerModalOpen === true, "rewind should preserve the winner modal state on the lethal attack line");
 });
 
 test("log display helper shows the newest entry first without renumbering", () => {
