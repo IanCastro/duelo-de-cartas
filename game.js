@@ -418,8 +418,6 @@
       playerControllers: cloneData(state.playerControllers),
       deckMode: state.deckMode,
       isMatchStarted: state.isMatchStarted,
-      isAiTurnInProgress: state.isAiTurnInProgress,
-      aiStepText: state.aiStepText,
       isLibraryOpen: state.isLibraryOpen,
       isRulesOpen: state.isRulesOpen,
       isLogOpen: state.isLogOpen,
@@ -466,8 +464,8 @@
       playerControllers: normalizePlayerControllers(snapshot.playerControllers),
       deckMode: normalizeDeckMode(snapshot.deckMode),
       isMatchStarted: Boolean(snapshot.isMatchStarted),
-      isAiTurnInProgress: Boolean(snapshot.isAiTurnInProgress),
-      aiStepText: snapshot.aiStepText || null,
+      isAiTurnInProgress: false,
+      aiStepText: null,
       isLibraryOpen: snapshot.isLibraryOpen,
       isRulesOpen: snapshot.isRulesOpen,
       isLogOpen: snapshot.isLogOpen,
@@ -664,7 +662,7 @@
     return issues;
   }
 
-  function applySilentReplayTurnTransition(state) {
+  function applySilentReplayTurnTransition(state, previouslyResolvedEventKind = null) {
     if (!state?.isMatchStarted || state.winner) {
       return false;
     }
@@ -677,7 +675,7 @@
     const healAmount = getSupportBonus(currentPlayer, "cura_fim_turno");
     const recovered = Math.min(healAmount, MAX_HEALTH - currentPlayer.vida);
 
-    if (recovered > 0) {
+    if (recovered > 0 && previouslyResolvedEventKind !== LOG_EVENT_TYPES.SUPPORT_HEAL) {
       return false;
     }
 
@@ -1072,6 +1070,7 @@
 
       for (let entryIndex = 1; entryIndex < logEntries.length; entryIndex += 1) {
         const entry = logEntries[entryIndex];
+        const previousEntry = logEntries[entryIndex - 1] || null;
         if (!entry?.snapshot || !entry?.event) {
           continue;
         }
@@ -1083,7 +1082,10 @@
 
         for (let silentTransitions = 0; silentTransitions <= maxSilentTransitions; silentTransitions += 1) {
           if (silentTransitions > 0) {
-            const advanced = applySilentReplayTurnTransition(workingState);
+            const advanced = applySilentReplayTurnTransition(
+              workingState,
+              silentTransitions === 1 ? previousEntry?.event?.kind : null
+            );
             if (!advanced) {
               break;
             }
@@ -2951,8 +2953,6 @@
       playerControllers: normalizePlayerControllers(snapshot.playerControllers),
       deckMode: normalizeDeckMode(snapshot.deckMode),
       isMatchStarted: Boolean(snapshot.isMatchStarted),
-      isAiTurnInProgress: Boolean(snapshot.isAiTurnInProgress),
-      aiStepText: snapshot.aiStepText || null,
       selectedAttackerId: snapshot.selectedAttackerId,
       selectedEffectCard: cloneData(snapshot.selectedEffectCard),
       turnNumber: snapshot.turnNumber,

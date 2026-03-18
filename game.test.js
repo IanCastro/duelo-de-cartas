@@ -1725,6 +1725,61 @@ test("log validator also passes on shared deck mode", () => {
   assert(result.validatedEntryCount === state.log.length, "shared-deck validation should cover every line");
 });
 
+test("log validator passes after a logged end-of-turn support heal", () => {
+  const state = createStartedState();
+  Object.assign(state.players[0].hand[0], {
+    id: "support-2",
+    nome: "Fonte Serena",
+    categoria: "suporte",
+    imagem: "assets/cards/support-2.png",
+    custo: 2,
+    efeito: "cura_fim_turno",
+    valor: 1,
+    descricao: ""
+  });
+  Object.assign(state.log[0].snapshot.players[0].hand[0], {
+    id: "support-2",
+    nome: "Fonte Serena",
+    categoria: "suporte",
+    imagem: "assets/cards/support-2.png",
+    custo: 2,
+    efeito: "cura_fim_turno",
+    valor: 1,
+    descricao: ""
+  });
+  state.players[0].vida = 35;
+  state.log[0].snapshot.players[0].vida = 35;
+
+  game.endTurn(state);
+  game.endTurn(state);
+  game.playCard(state, 0, state.players[0].hand[0].instanceId);
+  game.endTurn(state);
+
+  const result = game.validateMatchLog(state.log);
+
+  assert(result.status === game.LOG_VALIDATION_STATUS.VALID, "histories with logged support heal should validate successfully");
+});
+
+test("log validator passes on histories produced during ai turns", () => {
+  const state = createStartedState();
+  let safety = 0;
+
+  while (state.log.length < 5 && safety < 16) {
+    if (game.isAiControlledPlayer(state, state.currentPlayerIndex)) {
+      const action = game.performAiStep(state);
+      assert(Boolean(action), "ai test setup should keep producing actions");
+    } else {
+      game.endTurn(state);
+    }
+    safety += 1;
+  }
+
+  const result = game.validateMatchLog(state.log);
+
+  assert(result.status === game.LOG_VALIDATION_STATUS.VALID, "histories generated on ai turns should also validate successfully");
+  assert(result.validatedEntryCount === state.log.length, "ai-generated histories should validate every line");
+});
+
 test("log validator reports tampered snapshots", () => {
   const state = createStartedState();
   state.players[0].manaAtual = 2;
