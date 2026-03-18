@@ -790,9 +790,8 @@
           return { ok: false, code: "damage-mismatch", message: "O dano registrado no evento nao bate com o valor do efeito." };
         }
 
+        state.selectedEffectCard = cloneData(card);
         opponent.vida = Math.max(opponent.vida - event.damage, 0);
-        moveCardToDiscardForOwner(state, card, event.playerIndex);
-        state.selectedEffectCard = null;
         return { ok: true };
       }
 
@@ -816,6 +815,7 @@
           return { ok: false, code: "effect-unit-damage-mismatch", message: "O dano efetivo do evento nao bate com o dano calculado no replay." };
         }
 
+        state.selectedEffectCard = cloneData(card);
         target.vida = Math.max(target.vida - event.damage, 0);
         if (event.defeated) {
           removeCardByInstanceId(opponent.board, event.targetInstanceId);
@@ -824,8 +824,6 @@
           return { ok: false, code: "effect-unit-defeat-mismatch", message: "O replay derrotou a unidade, mas o evento nao marcou derrota." };
         }
 
-        moveCardToDiscardForOwner(state, card, event.playerIndex);
-        state.selectedEffectCard = null;
         return { ok: true };
       }
 
@@ -849,9 +847,8 @@
           return { ok: false, code: "heal-player-mismatch", message: "A cura registrada no evento nao bate com a cura calculada no replay." };
         }
 
+        state.selectedEffectCard = cloneData(card);
         targetPlayer.vida = Math.min(targetPlayer.vida + card.valor, MAX_HEALTH);
-        moveCardToDiscardForOwner(state, card, event.playerIndex);
-        state.selectedEffectCard = null;
         return { ok: true };
       }
 
@@ -875,9 +872,8 @@
           return { ok: false, code: "heal-unit-mismatch", message: "A cura registrada no evento nao bate com a cura calculada no replay." };
         }
 
+        state.selectedEffectCard = cloneData(card);
         target.vida = Math.min(target.vida + card.valor, target.vidaBase);
-        moveCardToDiscardForOwner(state, card, event.playerIndex);
-        state.selectedEffectCard = null;
         return { ok: true };
       }
 
@@ -1018,6 +1014,27 @@
     }
   }
 
+  function settleReplayStateAfterLoggedEvent(state, event) {
+    if (!state || !event) {
+      return state;
+    }
+
+    if (
+      event.kind === LOG_EVENT_TYPES.EFFECT_DAMAGE_PLAYER
+      || event.kind === LOG_EVENT_TYPES.EFFECT_DAMAGE_UNIT
+      || event.kind === LOG_EVENT_TYPES.EFFECT_HEAL_PLAYER
+      || event.kind === LOG_EVENT_TYPES.EFFECT_HEAL_UNIT
+    ) {
+      if (state.selectedEffectCard?.instanceId === event.cardInstanceId) {
+        moveCardToDiscardForOwner(state, state.selectedEffectCard, event.playerIndex);
+      }
+
+      state.selectedEffectCard = null;
+    }
+
+    return state;
+  }
+
   function validateMatchLog(logEntries) {
     const issues = [];
 
@@ -1102,7 +1119,7 @@
           }
 
           if (getSnapshotSignature(createStateSnapshot(attemptState)) === getSnapshotSignature(entry.snapshot)) {
-            replayState = attemptState;
+            replayState = settleReplayStateAfterLoggedEvent(attemptState, entry.event);
             validatedEntryCount = entryIndex + 1;
             matched = true;
             break;

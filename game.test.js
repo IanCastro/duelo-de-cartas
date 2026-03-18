@@ -32,6 +32,27 @@ function createStartedState(config = {}) {
   return game.startConfiguredMatch(state);
 }
 
+function snapshotStateForValidation(state) {
+  return JSON.parse(JSON.stringify({
+    deck: state.deck,
+    discardPile: state.discardPile,
+    playerDecks: state.playerDecks,
+    playerDiscardPiles: state.playerDiscardPiles,
+    currentPlayerIndex: state.currentPlayerIndex,
+    playerControllers: state.playerControllers,
+    deckMode: state.deckMode,
+    isMatchStarted: state.isMatchStarted,
+    isLibraryOpen: state.isLibraryOpen,
+    isRulesOpen: state.isRulesOpen,
+    isLogOpen: state.isLogOpen,
+    selectedAttackerId: state.selectedAttackerId,
+    selectedEffectCard: state.selectedEffectCard,
+    winnerPlayerId: state.winner ? state.winner.id : null,
+    turnNumber: state.turnNumber,
+    players: state.players
+  }));
+}
+
 test("initial state opens in pre-game with default player controllers", () => {
   const state = game.createInitialState();
 
@@ -1787,6 +1808,90 @@ test("log validator passes after a logged end-of-turn support heal", () => {
   const result = game.validateMatchLog(state.log);
 
   assert(result.status === game.LOG_VALIDATION_STATUS.VALID, "histories with logged support heal should validate successfully");
+});
+
+test("log validator passes after healing an allied unit with repair", () => {
+  const state = createStartedState();
+  state.players[0].manaAtual = 2;
+  state.players[0].manaMax = 2;
+  const healCard = state.players[0].hand[0];
+  Object.assign(healCard, {
+    id: "heal",
+    nome: "Reparo",
+    categoria: "efeito",
+    custo: 1,
+    efeito: "cura_direta",
+    valor: 6,
+    descricao: ""
+  });
+
+  const unitCard = state.players[0].hand.splice(1, 1)[0];
+  Object.assign(unitCard, {
+    id: "ally",
+    nome: "Aliada",
+    categoria: "unidade",
+    custo: 2,
+    ataque: 2,
+    vida: 2,
+    vidaBase: 5,
+    descricao: "",
+    estado: "campo",
+    podeAgir: true,
+    jaAtacouNoTurno: false,
+    isDefending: false,
+    defenseTurnNumber: null
+  });
+  state.players[0].board = [unitCard];
+  state.log[0].snapshot = snapshotStateForValidation(state);
+
+  game.playCard(state, 0, healCard.instanceId);
+  game.resolveEffectTarget(state, 0, "ally-unit", unitCard.instanceId);
+
+  const result = game.validateMatchLog(state.log);
+
+  assert(result.status === game.LOG_VALIDATION_STATUS.VALID, "repairing an allied unit should keep the log replay valid");
+});
+
+test("log validator passes after direct damage resolves on an enemy unit", () => {
+  const state = createStartedState();
+  state.players[0].manaAtual = 2;
+  state.players[0].manaMax = 2;
+  const damageCard = state.players[0].hand[0];
+  Object.assign(damageCard, {
+    id: "bolt",
+    nome: "Raio",
+    categoria: "efeito",
+    custo: 1,
+    efeito: "dano_direto",
+    valor: 3,
+    descricao: ""
+  });
+
+  const enemyUnit = state.players[1].hand.splice(0, 1)[0];
+  Object.assign(enemyUnit, {
+    id: "enemy",
+    nome: "Inimiga",
+    categoria: "unidade",
+    custo: 2,
+    ataque: 2,
+    vida: 5,
+    vidaBase: 5,
+    descricao: "",
+    estado: "campo",
+    podeAgir: true,
+    jaAtacouNoTurno: false,
+    isDefending: false,
+    defenseTurnNumber: null
+  });
+  state.players[1].board = [enemyUnit];
+  state.log[0].snapshot = snapshotStateForValidation(state);
+
+  game.playCard(state, 0, damageCard.instanceId);
+  game.resolveEffectTarget(state, 0, "unit", enemyUnit.instanceId);
+
+  const result = game.validateMatchLog(state.log);
+
+  assert(result.status === game.LOG_VALIDATION_STATUS.VALID, "direct damage on a unit should keep the log replay valid");
 });
 
 test("log validator passes on histories produced during ai turns", () => {
