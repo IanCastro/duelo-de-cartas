@@ -19,9 +19,16 @@ function test(name, callback) {
   }
 }
 
-function createStartedState(playerControllers = [game.PLAYER_CONTROLLER_TYPES.HUMAN, game.PLAYER_CONTROLLER_TYPES.AI]) {
+function createStartedState(config = {}) {
+  const playerControllers = Array.isArray(config)
+    ? config
+    : (config.playerControllers || [game.PLAYER_CONTROLLER_TYPES.HUMAN, game.PLAYER_CONTROLLER_TYPES.AI]);
+  const deckMode = Array.isArray(config)
+    ? game.DECK_MODES.SHARED
+    : (config.deckMode || game.DECK_MODES.SHARED);
   const state = game.createInitialState();
   state.playerControllers = [...playerControllers];
+  state.deckMode = deckMode;
   return game.startConfiguredMatch(state);
 }
 
@@ -38,18 +45,22 @@ test("initial state opens in pre-game with default player controllers", () => {
   assert(Array.isArray(state.playerControllers), "the game should store controller config by player");
   assert(state.playerControllers[0] === game.PLAYER_CONTROLLER_TYPES.HUMAN, "player 1 should default to human");
   assert(state.playerControllers[1] === game.PLAYER_CONTROLLER_TYPES.AI, "player 2 should default to ai");
+  assert(state.deckMode === game.DECK_MODES.SEPARATE, "pre-game should default to separate decks");
   assert(Array.isArray(state.log), "game should keep a log array");
   assert(state.log.length === 0, "pre-game should not start with match log entries");
 });
 
 test("start builds the initial match from the configured players", () => {
-  const state = createStartedState();
+  const state = game.startConfiguredMatch(game.createInitialState());
 
   assert(state.isMatchStarted === true, "Start should create an active match");
+  assert(state.deckMode === game.DECK_MODES.SEPARATE, "Start should respect the default separate deck mode");
   assert(state.players[0].vida === 40, "player 1 should start at max health");
   assert(state.players[1].vida === 40, "player 2 should start at max health");
   assert(state.players[0].hand.length === 4, "player 1 should draw 4 starting cards");
   assert(state.players[1].hand.length === 4, "player 2 should draw 4 starting cards");
+  assert(game.getPlayerDeckCount(state, 0) === 12, "player 1 should keep 12 cards in a separate deck after the opening hand");
+  assert(game.getPlayerDeckCount(state, 1) === 12, "player 2 should keep 12 cards in a separate deck after the opening hand");
   assert(state.players[0].manaAtual === 1 && state.players[0].manaMax === 1, "first player should start with 1 mana");
   assert(state.players[1].manaAtual === 0 && state.players[1].manaMax === 1, "second player should open the match showing 0/1 mana");
   assert(Array.isArray(state.log), "game should keep a log array");
@@ -76,6 +87,22 @@ test("session player controllers control how new matches start", () => {
   } finally {
     game.setSessionPlayerController(0, previousControllers[0]);
     game.setSessionPlayerController(1, previousControllers[1]);
+  }
+});
+
+test("session deck mode controls how new matches start", () => {
+  const previousDeckMode = game.getSessionDeckMode();
+
+  try {
+    game.setSessionDeckMode(game.DECK_MODES.SHARED);
+    const sharedMatch = game.createInitialState();
+    assert(sharedMatch.deckMode === game.DECK_MODES.SHARED, "new pre-game states should use the session deck mode");
+
+    game.setSessionDeckMode(game.DECK_MODES.SEPARATE);
+    const separateMatch = game.createInitialState();
+    assert(separateMatch.deckMode === game.DECK_MODES.SEPARATE, "changing the session deck mode should affect the next new match");
+  } finally {
+    game.setSessionDeckMode(previousDeckMode);
   }
 });
 
@@ -106,6 +133,15 @@ test("new game preserves the configured controllers", () => {
 
   assert(restartedState.playerControllers[0] === game.PLAYER_CONTROLLER_TYPES.AI, "restart should preserve player 1 controller");
   assert(restartedState.playerControllers[1] === game.PLAYER_CONTROLLER_TYPES.HUMAN, "restart should preserve player 2 controller");
+});
+
+test("new game preserves the configured deck mode", () => {
+  const previousState = createStartedState({ deckMode: game.DECK_MODES.SEPARATE });
+  previousState.deckMode = game.DECK_MODES.SHARED;
+
+  const restartedState = game.createRestartState(previousState);
+
+  assert(restartedState.deckMode === game.DECK_MODES.SHARED, "restart should preserve the configured deck mode");
 });
 
 test("pre-game blocks shortcuts and gameplay actions until Start", () => {
@@ -163,6 +199,63 @@ test("drawing spends mana and fails without enough resource", () => {
   assert(state.players[0].manaAtual === 0, "draw should cost 1 mana");
   assert(state.deck.length === deckBeforeDraw - 1, "deck should shrink after buying a card");
   assert(secondDraw === null, "second draw should fail without mana");
+});
+
+test("separate deck mode draws from the current player's own deck", () => {
+  const state = createStartedState({ deckMode: game.DECK_MODES.SEPARATE });
+  const playerOneDeckBeforeDraw = game.getPlayerDeckCount(state, 0);
+  const playerTwoDeckBeforeDraw = game.getPlayerDeckCount(state, 1);
+
+  const drawResult = game.drawTurnCard(state, 0);
+
+  assert(drawResult !== null, "draw should still succeed in separate deck mode");
+  assert(game.getPlayerDeckCount(state, 0) === playerOneDeckBeforeDraw - 1, "player 1 should draw from their own deck");
+  assert(game.getPlayerDeckCount(state, 1) === playerTwoDeckBeforeDraw, "player 2 deck should stay untouched by player 1 draw");
+});
+
+test("shared deck mode still uses the global deck of 32 cards", () => {
+  const state = createStartedState({ deckMode: game.DECK_MODES.SHARED });
+
+  assert(state.deckMode === game.DECK_MODES.SHARED, "helper should be able to start a shared-deck match");
+  assert(state.deck.length === 24, "shared deck should keep a single common pile after both opening hands");
+  assert(game.getPlayerDeckTotal(state) === 32, "shared mode should keep the global total size");
+});
+
+test("separate deck mode sends discarded cards to the owner's discard pile", () => {
+  const state = createStartedState({ deckMode: game.DECK_MODES.SEPARATE });
+  state.players[0].manaAtual = 2;
+  state.players[0].manaMax = 2;
+  state.players[0].hand = [{
+    id: "effect-1",
+    instanceId: "effect-1",
+    nome: "Raio Arcano",
+    categoria: "efeito",
+    custo: 1,
+    efeito: "dano_direto",
+    valor: 3,
+    descricao: ""
+  }];
+  state.players[1].board = [{
+    id: "def",
+    instanceId: "def",
+    nome: "Defensora",
+    categoria: "unidade",
+    custo: 2,
+    ataque: 1,
+    vida: 2,
+    vidaBase: 2,
+    descricao: "",
+    estado: "campo",
+    podeAgir: true,
+    jaAtacouNoTurno: false
+  }];
+
+  game.playCard(state, 0, "effect-1");
+  game.resolveEffectTarget(state, 0, "unit", "def");
+
+  assert(state.playerDiscardPiles[0].length === 1, "the effect should go to player 1 discard pile");
+  assert(state.playerDiscardPiles[1].length === 1, "the defeated unit should go to player 2 discard pile");
+  assert(state.discardPile.length === 0, "the shared discard should stay empty in separate mode");
 });
 
 test("drawing is blocked while an attack is being aimed", () => {
@@ -839,6 +932,121 @@ test("end turn refreshes next player's units for combat", () => {
   assert(state.players[1].board[0].jaAtacouNoTurno === false, "next player's unit attack should refresh");
 });
 
+test("unit can enter and cancel defense in the same turn", () => {
+  const state = createStartedState();
+  state.players[0].board = [{
+    id: "guard",
+    instanceId: "guard",
+    nome: "Guardiao",
+    categoria: "unidade",
+    custo: 4,
+    ataque: 2,
+    vida: 8,
+    vidaBase: 8,
+    descricao: "",
+    estado: "campo",
+    podeAgir: true,
+    jaAtacouNoTurno: false,
+    isDefending: false,
+    defenseTurnNumber: null
+  }];
+
+  const entered = game.enterDefenseMode(state, 0, "guard");
+
+  assert(entered === true, "defense should be available for a ready allied unit");
+  assert(state.players[0].board[0].isDefending === true, "unit should enter defense mode");
+  assert(state.players[0].board[0].jaAtacouNoTurno === true, "defense should spend the action for the turn");
+
+  const canceled = game.cancelDefenseMode(state, 0, "guard");
+
+  assert(canceled === true, "defense should be cancelable on the same turn");
+  assert(state.players[0].board[0].isDefending === false, "unit should leave defense mode after canceling");
+  assert(state.players[0].board[0].jaAtacouNoTurno === false, "canceling defense should restore the action");
+});
+
+test("defense halves incoming combat damage rounding up", () => {
+  const state = createStartedState();
+  state.players[0].board = [{
+    id: "atk",
+    instanceId: "atk",
+    nome: "Atacante",
+    categoria: "unidade",
+    custo: 3,
+    ataque: 3,
+    vida: 3,
+    vidaBase: 3,
+    descricao: "",
+    estado: "campo",
+    podeAgir: true,
+    jaAtacouNoTurno: false
+  }];
+  state.players[1].board = [{
+    id: "def",
+    instanceId: "def",
+    nome: "Defensora",
+    categoria: "unidade",
+    custo: 2,
+    ataque: 1,
+    vida: 4,
+    vidaBase: 4,
+    descricao: "",
+    estado: "campo",
+    podeAgir: true,
+    jaAtacouNoTurno: true,
+    isDefending: true,
+    defenseTurnNumber: state.turnNumber
+  }];
+
+  game.selectAttacker(state, 0, "atk");
+  const attacked = game.attackTarget(state, 0, "unit", "def");
+
+  assert(attacked === true, "attack should still resolve against a defending unit");
+  assert(state.players[1].board[0].vida === 2, "3 damage should become 2 against defense");
+});
+
+test("defense also halves direct damage and expires on the owner's next turn", () => {
+  const state = createStartedState();
+  state.players[0].manaAtual = 2;
+  state.players[0].manaMax = 2;
+  state.players[0].hand = [{
+    id: "effect-1",
+    instanceId: "effect-1",
+    nome: "Raio Arcano",
+    categoria: "efeito",
+    custo: 1,
+    efeito: "dano_direto",
+    valor: 3,
+    descricao: ""
+  }];
+  state.players[1].board = [{
+    id: "def",
+    instanceId: "def",
+    nome: "Defensora",
+    categoria: "unidade",
+    custo: 2,
+    ataque: 1,
+    vida: 4,
+    vidaBase: 4,
+    descricao: "",
+    estado: "campo",
+    podeAgir: true,
+    jaAtacouNoTurno: true,
+    isDefending: true,
+    defenseTurnNumber: state.turnNumber
+  }];
+
+  game.playCard(state, 0, "effect-1");
+  const resolved = game.resolveEffectTarget(state, 0, "unit", "def");
+
+  assert(resolved === true, "direct damage should still resolve against a defending unit");
+  assert(state.players[1].board[0].vida === 2, "direct damage should also be halved against defense");
+
+  game.endTurn(state);
+  game.endTurn(state);
+
+  assert(state.players[1].board[0].isDefending === false, "defense should expire at the start of the owner's next turn");
+});
+
 test("attack against a unit deals damage and discards it if defeated", () => {
   const state = createStartedState();
   state.players[0].board = [{
@@ -1138,13 +1346,19 @@ test("layout markup removes the cancel button and keeps a pending effect slot", 
   assert(!html.includes("id=\"exit-history-view-button\""), "history mode should no longer render a dedicated back button");
   assert(!html.includes("id=\"rewind-history-button\""), "history mode should no longer render a dedicated rewind button");
   assert(!html.includes("id=\"game-mode-select\""), "the old shared mode selector should be removed");
-  assert(html.includes("id=\"player-1-controller-human\""), "the hero should expose a controller toggle for player 1");
-  assert(html.includes("id=\"player-2-controller-ai\""), "the hero should expose a controller toggle for player 2");
-  assert(html.includes("id=\"start-button\""), "the hero should expose a Start button for the pre-game");
+  assert(html.includes("id=\"match-config-panel\""), "the page should render a dedicated pre-game configuration panel");
+  assert(html.includes("id=\"player-1-controller-human\""), "the config panel should expose a controller toggle for player 1");
+  assert(html.includes("id=\"player-2-controller-ai\""), "the config panel should expose a controller toggle for player 2");
+  assert(html.includes("id=\"deck-mode-separate\""), "the config panel should expose a separate-deck toggle");
+  assert(html.includes("id=\"deck-mode-shared\""), "the config panel should expose a shared-deck toggle");
+  assert(html.includes("id=\"start-button\""), "the config panel should expose a Start button for the pre-game");
+  assert(html.includes("id=\"player-1-deck-stat\""), "player panels should expose per-player deck stats");
   assert(html.includes("compact-action-button"), "turn action buttons should use the compact button style");
   assert(html.includes("pressione Esc para voltar ao presente"), "rules should describe how to leave history view without dedicated buttons");
   assert(html.includes("so comeca quando voce clicar em Start"), "rules should describe the pre-game Start flow");
   assert(html.includes("configuracao fica travada"), "rules should explain that Humano/IA choices lock after Start");
+  assert(html.includes("default e Separado"), "rules should describe the default separate deck mode");
+  assert(html.includes("carta fica deitada"), "rules should describe the defense stance visuals");
   assert(html.includes("IA vs IA"), "rules should describe how to configure ai vs ai");
 });
 

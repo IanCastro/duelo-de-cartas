@@ -4,13 +4,19 @@
   const MAX_MANA = 8;
   const DRAW_COST = 1;
   const CARD_COPIES_PER_TYPE = 4;
+  const SEPARATE_DECK_COPIES_PER_TYPE = 2;
   const AI_STEP_DELAY_MS = 500;
+  const DECK_MODES = Object.freeze({
+    SHARED: "shared",
+    SEPARATE: "separate"
+  });
   const PLAYER_CONTROLLER_TYPES = Object.freeze({
     HUMAN: "human",
     AI: "ai"
   });
 
   let sessionPlayerControllers = [PLAYER_CONTROLLER_TYPES.HUMAN, PLAYER_CONTROLLER_TYPES.AI];
+  let sessionDeckMode = DECK_MODES.SEPARATE;
   let aiTurnTimerId = null;
 
   const CARD_LIBRARY = [
@@ -100,7 +106,11 @@
     }
   ];
 
-  function getTotalDeckSize() {
+  function getTotalDeckSize(deckMode = DECK_MODES.SHARED) {
+    if (deckMode === DECK_MODES.SEPARATE) {
+      return CARD_LIBRARY.length * SEPARATE_DECK_COPIES_PER_TYPE;
+    }
+
     return CARD_LIBRARY.length * CARD_COPIES_PER_TYPE;
   }
 
@@ -111,8 +121,8 @@
     };
   }
 
-  function createDeck() {
-    const suffixes = ["a", "b", "c", "d"].slice(0, CARD_COPIES_PER_TYPE);
+  function createDeck(copiesPerType = CARD_COPIES_PER_TYPE) {
+    const suffixes = ["a", "b", "c", "d"].slice(0, copiesPerType);
     return CARD_LIBRARY.flatMap((card) => suffixes.map((suffix) => instantiateCard(card, suffix)));
   }
 
@@ -141,6 +151,19 @@
 
   function getSessionPlayerControllers() {
     return [...sessionPlayerControllers];
+  }
+
+  function normalizeDeckMode(deckMode) {
+    return deckMode === DECK_MODES.SHARED ? DECK_MODES.SHARED : DECK_MODES.SEPARATE;
+  }
+
+  function getSessionDeckMode() {
+    return sessionDeckMode;
+  }
+
+  function setSessionDeckMode(deckMode) {
+    sessionDeckMode = normalizeDeckMode(deckMode);
+    return sessionDeckMode;
   }
 
   function setSessionPlayerControllers(controllers) {
@@ -174,8 +197,11 @@
     return {
       deck: [],
       discardPile: [],
+      playerDecks: [[], []],
+      playerDiscardPiles: [[], []],
       currentPlayerIndex: 0,
       playerControllers: getSessionPlayerControllers(),
+      deckMode: getSessionDeckMode(),
       isMatchStarted: false,
       isAiTurnInProgress: false,
       aiStepText: null,
@@ -201,11 +227,26 @@
     const nextState = createInitialState();
     const preservedControllers = setSessionPlayerControllers(previousState?.playerControllers);
     nextState.playerControllers = preservedControllers;
+    nextState.deckMode = setSessionDeckMode(previousState?.deckMode);
     nextState.isLibraryOpen = Boolean(previousState?.isLibraryOpen);
     nextState.isRulesOpen = Boolean(previousState?.isRulesOpen);
     nextState.isLogOpen = Boolean(previousState?.isLogOpen);
     nextState.isMatchStarted = true;
-    nextState.deck = shuffleDeck(createDeck());
+
+    if (nextState.deckMode === DECK_MODES.SHARED) {
+      nextState.deck = shuffleDeck(createDeck());
+      nextState.discardPile = [];
+      nextState.playerDecks = [[], []];
+      nextState.playerDiscardPiles = [[], []];
+    } else {
+      nextState.deck = [];
+      nextState.discardPile = [];
+      nextState.playerDecks = [
+        shuffleDeck(createDeck(SEPARATE_DECK_COPIES_PER_TYPE)),
+        shuffleDeck(createDeck(SEPARATE_DECK_COPIES_PER_TYPE))
+      ];
+      nextState.playerDiscardPiles = [[], []];
+    }
 
     for (let playerIndex = 0; playerIndex < nextState.players.length; playerIndex += 1) {
       for (let draw = 0; draw < STARTING_HAND_SIZE; draw += 1) {
@@ -227,6 +268,7 @@
     }
 
     nextState.playerControllers = setSessionPlayerControllers(previousState.playerControllers);
+    nextState.deckMode = setSessionDeckMode(previousState.deckMode);
     nextState.isLibraryOpen = Boolean(previousState.isLibraryOpen);
     nextState.isRulesOpen = Boolean(previousState.isRulesOpen);
     nextState.isLogOpen = Boolean(previousState.isLogOpen);
@@ -245,12 +287,86 @@
     return `Partida iniciada. ${playerHands}.`;
   }
 
+  function getDrawPile(state, playerIndex) {
+    if (state.deckMode === DECK_MODES.SEPARATE) {
+      return state.playerDecks[playerIndex];
+    }
+
+    return state.deck;
+  }
+
+  function getDiscardPileForPlayer(state, playerIndex) {
+    if (state.deckMode === DECK_MODES.SEPARATE) {
+      return state.playerDiscardPiles[playerIndex];
+    }
+
+    return state.discardPile;
+  }
+
+  function getPlayerDeckTotal(state) {
+    return getTotalDeckSize(state?.deckMode);
+  }
+
+  function getPlayerDeckCount(state, playerIndex) {
+    if (!state?.isMatchStarted) {
+      return getPlayerDeckTotal(state);
+    }
+
+    const pile = getDrawPile(state, playerIndex);
+    return Array.isArray(pile) ? pile.length : 0;
+  }
+
+  function getDeckCountForLibrary(state, currentPlayerIndex) {
+    if (!state) {
+      return {};
+    }
+
+    if (!state.isMatchStarted) {
+      const copiesPerType = state.deckMode === DECK_MODES.SEPARATE ? SEPARATE_DECK_COPIES_PER_TYPE : CARD_COPIES_PER_TYPE;
+      return getDeckCardCounts(createDeck(copiesPerType));
+    }
+
+    const libraryPlayerIndex = state.deckMode === DECK_MODES.SEPARATE ? currentPlayerIndex : 0;
+    return getDeckCardCounts(getDrawPile(state, libraryPlayerIndex));
+  }
+
+  function getGlobalDeckCount(state) {
+    if (!state) {
+      return 0;
+    }
+
+    if (!state.isMatchStarted) {
+      return getTotalDeckSize(state.deckMode);
+    }
+
+    if (state.deckMode === DECK_MODES.SEPARATE) {
+      return getPlayerDeckCount(state, 0) + getPlayerDeckCount(state, 1);
+    }
+
+    return state.deck.length;
+  }
+
+  function getGlobalDiscardCount(state) {
+    if (!state) {
+      return 0;
+    }
+
+    if (state.deckMode === DECK_MODES.SEPARATE) {
+      return state.playerDiscardPiles.reduce((total, pile) => total + pile.length, 0);
+    }
+
+    return state.discardPile.length;
+  }
+
   function createStateSnapshot(state) {
     return {
       deck: cloneData(state.deck),
       discardPile: cloneData(state.discardPile),
+      playerDecks: cloneData(state.playerDecks),
+      playerDiscardPiles: cloneData(state.playerDiscardPiles),
       currentPlayerIndex: state.currentPlayerIndex,
       playerControllers: cloneData(state.playerControllers),
+      deckMode: state.deckMode,
       isMatchStarted: state.isMatchStarted,
       isAiTurnInProgress: state.isAiTurnInProgress,
       aiStepText: state.aiStepText,
@@ -291,8 +407,11 @@
     const restoredState = {
       deck: cloneData(snapshot.deck),
       discardPile: cloneData(snapshot.discardPile),
+      playerDecks: cloneData(snapshot.playerDecks || [[], []]),
+      playerDiscardPiles: cloneData(snapshot.playerDiscardPiles || [[], []]),
       currentPlayerIndex: snapshot.currentPlayerIndex,
       playerControllers: normalizePlayerControllers(snapshot.playerControllers),
+      deckMode: normalizeDeckMode(snapshot.deckMode),
       isMatchStarted: Boolean(snapshot.isMatchStarted),
       isAiTurnInProgress: Boolean(snapshot.isAiTurnInProgress),
       aiStepText: snapshot.aiStepText || null,
@@ -512,6 +631,12 @@
     const unitCards = playableCards
       .filter((card) => card.categoria === "unidade")
       .sort(compareUnitsForAiPlay);
+    const defendableUnits = player.board
+      .filter((unit) => canUnitEnterDefense(state, state.currentPlayerIndex, unit))
+      .sort((left, right) => ((right.custo || 0) - (left.custo || 0))
+        || ((right.vidaBase || 0) - (left.vidaBase || 0))
+        || (right.ataque - left.ataque)
+        || compareText(left.nome, right.nome));
 
     const lethalAttacker = [...readyAttackers]
       .sort(compareAttackersByPowerAsc(player))
@@ -535,7 +660,7 @@
 
     for (const card of damageCards) {
       const killTargets = opponent.board
-        .filter((unit) => unit.vida <= card.valor)
+        .filter((unit) => unit.vida <= getMitigatedDamage(unit, card.valor))
         .sort(compareUnitsByThreatDesc);
 
       if (killTargets[0]) {
@@ -594,12 +719,12 @@
     }
 
     const killableTargets = opponent.board
-      .filter((target) => readyAttackers.some((attacker) => getUnitAttack(attacker, player) >= target.vida))
+      .filter((target) => readyAttackers.some((attacker) => getMitigatedDamage(target, getUnitAttack(attacker, player)) >= target.vida))
       .sort(compareUnitsByThreatDesc);
     if (killableTargets[0]) {
       const chosenTarget = killableTargets[0];
       const attacker = [...readyAttackers]
-        .filter((unit) => getUnitAttack(unit, player) >= chosenTarget.vida)
+        .filter((unit) => getMitigatedDamage(chosenTarget, getUnitAttack(unit, player)) >= chosenTarget.vida)
         .sort(compareAttackersByPowerAsc(player))[0];
 
       if (attacker) {
@@ -645,7 +770,15 @@
       };
     }
 
-    if (state.deck.length > 0 && canAfford(player, DRAW_COST)) {
+    if (opponent.board.length > 0 && defendableUnits[0]) {
+      return {
+        type: "defend-unit",
+        targetInstanceId: defendableUnits[0].instanceId,
+        text: `IA colocou ${defendableUnits[0].nome} em defesa.`
+      };
+    }
+
+    if (getDrawPile(state, state.currentPlayerIndex).length > 0 && canAfford(player, DRAW_COST)) {
       return {
         type: "draw-card",
         text: "IA comprou uma carta."
@@ -704,6 +837,10 @@
     if (action.type === "attack-support") {
       didAct = selectAttacker(state, playerIndex, action.attackerInstanceId)
         && attackTarget(state, playerIndex, "support", action.targetInstanceId);
+    }
+
+    if (action.type === "defend-unit") {
+      didAct = enterDefenseMode(state, playerIndex, action.targetInstanceId);
     }
 
     if (action.type === "end-turn") {
@@ -835,12 +972,48 @@
     }
 
     overlayData.lifeText = `VIDA ${card.vida}/${card.vidaBase}`;
-    overlayData.stateText = card.jaAtacouNoTurno ? "JA ATACOU" : card.podeAgir ? "PRONTA" : "EM ESPERA";
+    overlayData.stateText = card.isDefending ? "DEFENDENDO" : card.jaAtacouNoTurno ? "JA ATACOU" : card.podeAgir ? "PRONTA" : "EM ESPERA";
     return overlayData;
   }
 
   function getAvailableAttackers(player) {
-    return player.board.filter((unit) => unit.podeAgir && !unit.jaAtacouNoTurno);
+    return player.board.filter((unit) => unit.podeAgir && !unit.jaAtacouNoTurno && !unit.isDefending);
+  }
+
+  function canUnitEnterDefense(state, playerIndex, unit) {
+    return Boolean(
+      state
+      && unit
+      && state.isMatchStarted
+      && !state.winner
+      && state.currentPlayerIndex === playerIndex
+      && !state.selectedEffectCard
+      && unit.estado === "campo"
+      && unit.podeAgir
+      && !unit.jaAtacouNoTurno
+      && !unit.isDefending
+    );
+  }
+
+  function canUnitCancelDefense(state, playerIndex, unit) {
+    return Boolean(
+      state
+      && unit
+      && state.isMatchStarted
+      && !state.winner
+      && state.currentPlayerIndex === playerIndex
+      && unit.estado === "campo"
+      && unit.isDefending
+      && unit.defenseTurnNumber === state.turnNumber
+    );
+  }
+
+  function getMitigatedDamage(unit, rawDamage) {
+    if (!unit || !unit.isDefending) {
+      return rawDamage;
+    }
+
+    return Math.ceil(rawDamage / 2);
   }
 
   function canAfford(player, cost) {
@@ -858,12 +1031,13 @@
 
   function drawCard(state, playerIndex, shouldLog = true) {
     const player = state.players[playerIndex];
+    const drawPile = getDrawPile(state, playerIndex);
 
-    if (!state.deck.length) {
+    if (!drawPile.length) {
       return null;
     }
 
-    const card = state.deck.pop();
+    const card = drawPile.pop();
     player.hand.push(card);
 
     if (shouldLog) {
@@ -896,7 +1070,11 @@
   }
 
   function moveCardToDiscard(state, card) {
-    state.discardPile.push(card);
+    moveCardToDiscardForOwner(state, card, state.currentPlayerIndex);
+  }
+
+  function moveCardToDiscardForOwner(state, card, ownerPlayerIndex) {
+    getDiscardPileForPlayer(state, ownerPlayerIndex).push(card);
   }
 
   function resolveDamageEffectOnPlayer(state, card, player, opponent) {
@@ -912,17 +1090,18 @@
     }
 
     const target = opponent.board[targetIndex];
-    target.vida = Math.max(target.vida - card.valor, 0);
+    const inflictedDamage = getMitigatedDamage(target, card.valor);
+    target.vida = Math.max(target.vida - inflictedDamage, 0);
 
     if (target.vida <= 0) {
       const [defeatedUnit] = opponent.board.splice(targetIndex, 1);
-      moveCardToDiscard(state, defeatedUnit);
-      addLog(state, `${player.nome} usou ${card.nome} e causou ${card.valor} de dano em ${target.nome}.`);
+      moveCardToDiscardForOwner(state, defeatedUnit, (state.currentPlayerIndex + 1) % 2);
+      addLog(state, `${player.nome} usou ${card.nome} e causou ${inflictedDamage} de dano em ${target.nome}.`);
       addLog(state, `${defeatedUnit.nome} foi derrotada e enviada ao descarte.`);
       return true;
     }
 
-    addLog(state, `${player.nome} usou ${card.nome} e causou ${card.valor} de dano em ${target.nome}.`);
+    addLog(state, `${player.nome} usou ${card.nome} e causou ${inflictedDamage} de dano em ${target.nome}.`);
     return true;
   }
 
@@ -990,7 +1169,7 @@
       return false;
     }
 
-    moveCardToDiscard(state, card);
+    moveCardToDiscardForOwner(state, card, playerIndex);
     state.selectedEffectCard = null;
     checkWinner(state);
     return true;
@@ -1022,7 +1201,9 @@
         ...card,
         estado: "campo",
         podeAgir: true,
-        jaAtacouNoTurno: false
+        jaAtacouNoTurno: false,
+        isDefending: false,
+        defenseTurnNumber: null
       });
       addLog(state, `${player.nome} baixou ${card.nome} no campo por ${card.custo} mana.`);
       return true;
@@ -1042,7 +1223,7 @@
       return true;
     }
 
-    moveCardToDiscard(state, card);
+    moveCardToDiscardForOwner(state, card, playerIndex);
 
     checkWinner(state);
     return true;
@@ -1056,7 +1237,7 @@
     const player = state.players[playerIndex];
     const unit = player.board.find((card) => card.instanceId === unitInstanceId);
 
-    if (!unit || !unit.podeAgir || unit.jaAtacouNoTurno) {
+    if (!unit || !unit.podeAgir || unit.jaAtacouNoTurno || unit.isDefending) {
       return false;
     }
 
@@ -1082,7 +1263,7 @@
     const opponent = state.players[(playerIndex + 1) % 2];
     const attacker = player.board.find((card) => card.instanceId === state.selectedAttackerId);
 
-    if (!attacker || !attacker.podeAgir || attacker.jaAtacouNoTurno) {
+    if (!attacker || !attacker.podeAgir || attacker.jaAtacouNoTurno || attacker.isDefending) {
       return false;
     }
 
@@ -1111,7 +1292,7 @@
       }
 
       const [defeatedSupport] = opponent.supportZone.splice(targetIndex, 1);
-      moveCardToDiscard(state, defeatedSupport);
+      moveCardToDiscardForOwner(state, defeatedSupport, (playerIndex + 1) % 2);
       addLog(state, `${attacker.nome} destruiu o suporte ${defeatedSupport.nome}.`);
       return true;
     }
@@ -1124,17 +1305,50 @@
     }
 
     const target = opponent.board[targetIndex];
-    target.vida = Math.max(target.vida - attackValue, 0);
+    const inflictedDamage = getMitigatedDamage(target, attackValue);
+    target.vida = Math.max(target.vida - inflictedDamage, 0);
 
     if (target.vida <= 0) {
       const [defeatedUnit] = opponent.board.splice(targetIndex, 1);
-      moveCardToDiscard(state, defeatedUnit);
-      addLog(state, `${attacker.nome} atacou ${target.nome} e causou ${attackValue} de dano.`);
+      moveCardToDiscardForOwner(state, defeatedUnit, (playerIndex + 1) % 2);
+      addLog(state, `${attacker.nome} atacou ${target.nome} e causou ${inflictedDamage} de dano.`);
       addLog(state, `${defeatedUnit.nome} foi derrotada e enviada ao descarte.`);
       return true;
     }
 
-    addLog(state, `${attacker.nome} atacou ${target.nome} e causou ${attackValue} de dano.`);
+    addLog(state, `${attacker.nome} atacou ${target.nome} e causou ${inflictedDamage} de dano.`);
+    return true;
+  }
+
+  function enterDefenseMode(state, playerIndex, unitInstanceId) {
+    const player = state.players[playerIndex];
+    const unit = player.board.find((card) => card.instanceId === unitInstanceId);
+
+    if (!canUnitEnterDefense(state, playerIndex, unit)) {
+      return false;
+    }
+
+    state.selectedAttackerId = null;
+    unit.isDefending = true;
+    unit.defenseTurnNumber = state.turnNumber;
+    unit.jaAtacouNoTurno = true;
+    addLog(state, `${player.nome} colocou ${unit.nome} em defesa.`);
+    return true;
+  }
+
+  function cancelDefenseMode(state, playerIndex, unitInstanceId) {
+    const player = state.players[playerIndex];
+    const unit = player.board.find((card) => card.instanceId === unitInstanceId);
+
+    if (!canUnitCancelDefense(state, playerIndex, unit)) {
+      return false;
+    }
+
+    unit.isDefending = false;
+    unit.defenseTurnNumber = null;
+    unit.jaAtacouNoTurno = false;
+    unit.podeAgir = true;
+    addLog(state, `${player.nome} cancelou a defesa de ${unit.nome}.`);
     return true;
   }
 
@@ -1192,16 +1406,18 @@
     }
 
     const player = state.players[playerIndex];
-    const canDraw = state.deck.length > 0 && canAfford(player, DRAW_COST);
+    const canDraw = getDrawPile(state, playerIndex).length > 0 && canAfford(player, DRAW_COST);
     const playableCards = player.hand.filter((card) => canPlayCard(state, playerIndex, card)).length;
     const readyAttackers = getAvailableAttackers(player).length;
+    const defendableUnits = player.board.filter((unit) => canUnitEnterDefense(state, playerIndex, unit)).length;
     const pendingSelection = Boolean(state.selectedAttackerId || state.selectedEffectCard);
-    const hasAny = canDraw || playableCards > 0 || readyAttackers > 0 || pendingSelection;
+    const hasAny = canDraw || playableCards > 0 || readyAttackers > 0 || defendableUnits > 0 || pendingSelection;
 
     return {
       canDraw,
       playableCards,
       readyAttackers,
+      defendableUnits,
       pendingSelection,
       hasAny
     };
@@ -1308,6 +1524,8 @@
     player.board.forEach((unit) => {
       unit.podeAgir = true;
       unit.jaAtacouNoTurno = false;
+      unit.isDefending = false;
+      unit.defenseTurnNumber = null;
     });
   }
 
@@ -1391,6 +1609,10 @@
   function getCardStateText(card) {
     if (card.categoria !== "unidade" || card.estado !== "campo") {
       return null;
+    }
+
+    if (card.isDefending) {
+      return "DEFENDENDO";
     }
 
     if (card.jaAtacouNoTurno) {
@@ -1585,9 +1807,18 @@
   }
 
   function createCardElement(card, config) {
+    const wrapper = document.createElement("div");
     const button = document.createElement("button");
-    const { interactive = false, selected = false, className = "", onClick, player } = config;
+    const {
+      interactive = false,
+      selected = false,
+      className = "",
+      onClick,
+      player,
+      defenseToggle = null
+    } = config;
     const classes = ["card", className];
+    wrapper.className = `card-entry${card.isDefending ? " is-defending" : ""}`;
 
     if (interactive) {
       classes.push("playable");
@@ -1607,6 +1838,10 @@
       classes.push("spent");
     }
 
+    if (card.isDefending) {
+      classes.push("defending");
+    }
+
     button.type = "button";
     button.className = classes.join(" ").trim();
     button.disabled = !interactive;
@@ -1617,7 +1852,26 @@
       button.addEventListener("click", onClick);
     }
 
-    return button;
+    wrapper.appendChild(button);
+
+    if (defenseToggle) {
+      const defenseButton = document.createElement("button");
+      defenseButton.type = "button";
+      defenseButton.className = `card-defense-toggle${defenseToggle.active ? " is-active" : ""}`;
+      defenseButton.textContent = defenseToggle.active ? "CAN" : "DEF";
+      defenseButton.title = defenseToggle.active ? "Cancelar defesa" : "Entrar em defesa";
+      defenseButton.disabled = !defenseToggle.interactive;
+      if (defenseToggle.interactive && typeof defenseToggle.onClick === "function") {
+        defenseButton.addEventListener("click", (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          defenseToggle.onClick();
+        });
+      }
+      wrapper.appendChild(defenseButton);
+    }
+
+    return wrapper;
   }
 
   function renderCardList(containerId, cards, factory, emptyMessage) {
@@ -1645,7 +1899,8 @@
     }
 
     libraryElement.innerHTML = "";
-    const deckCounts = state ? getDeckCardCounts(state.deck) : {};
+    const deckCounts = getDeckCountForLibrary(state, state?.currentPlayerIndex || 0);
+    const deckCopiesPerCard = state?.deckMode === DECK_MODES.SEPARATE ? SEPARATE_DECK_COPIES_PER_TYPE : CARD_COPIES_PER_TYPE;
 
     ["unidade", "suporte", "efeito"].forEach((category) => {
       const section = document.createElement("section");
@@ -1665,7 +1920,7 @@
           item.setAttribute("aria-label", card.nome);
           item.innerHTML = buildCardMarkup(card, null, {
             showDynamicState: false,
-            countLabel: `${deckCounts[card.id] || 0}/${CARD_COPIES_PER_TYPE} no baralho`
+            countLabel: `${deckCounts[card.id] || 0}/${deckCopiesPerCard} no baralho`
           });
 
           section.appendChild(item);
@@ -1756,8 +2011,12 @@
     historyTitle.textContent = `Acao ${selectedEntry.numero}`;
     historyText.textContent = selectedEntry.texto;
     historyTurn.textContent = snapshot.players[snapshot.currentPlayerIndex].nome;
-    historyDeck.textContent = `${snapshot.deck.length}/${getTotalDeckSize()}`;
-    historyDiscard.textContent = String(snapshot.discardPile.length);
+    historyDeck.textContent = snapshot.deckMode === DECK_MODES.SEPARATE
+      ? `${(snapshot.playerDecks?.[0]?.length || 0) + (snapshot.playerDecks?.[1]?.length || 0)}/${getTotalDeckSize(DECK_MODES.SEPARATE)}`
+      : `${snapshot.deck.length}/${getTotalDeckSize()}`;
+    historyDiscard.textContent = snapshot.deckMode === DECK_MODES.SEPARATE
+      ? String((snapshot.playerDiscardPiles?.[0]?.length || 0) + (snapshot.playerDiscardPiles?.[1]?.length || 0))
+      : String(snapshot.discardPile.length);
 
     snapshot.players.forEach((player) => {
       const panel = document.createElement("section");
@@ -1829,8 +2088,11 @@
       ...state,
       deck: cloneData(snapshot.deck),
       discardPile: cloneData(snapshot.discardPile),
+      playerDecks: cloneData(snapshot.playerDecks || [[], []]),
+      playerDiscardPiles: cloneData(snapshot.playerDiscardPiles || [[], []]),
       currentPlayerIndex: snapshot.currentPlayerIndex,
       playerControllers: normalizePlayerControllers(snapshot.playerControllers),
+      deckMode: normalizeDeckMode(snapshot.deckMode),
       isMatchStarted: Boolean(snapshot.isMatchStarted),
       isAiTurnInProgress: Boolean(snapshot.isAiTurnInProgress),
       aiStepText: snapshot.aiStepText || null,
@@ -1862,9 +2124,19 @@
       document.getElementById(`player-${player.id}-board-count`).textContent = `${player.board.length} em campo`;
       document.getElementById(`player-${player.id}-support-count`).textContent = `${player.supportZone.length} suportes`;
       document.getElementById(`player-${player.id}-mana`).textContent = `${player.manaAtual}/${player.manaMax}`;
+      const playerDeckCount = document.getElementById(`player-${player.id}-deck-count`);
+      const playerDeckStat = document.getElementById(`player-${player.id}-deck-stat`);
       const playerNameButton = document.getElementById(`player-${player.id}-name`);
       const playerTargetHint = document.getElementById(`player-${player.id}-target-hint`);
       const headerTargetMode = (viewingHistory || aiTurnActive || !state.isMatchStarted) ? null : getPlayerHeaderTargetMode(state, index);
+
+      if (playerDeckCount) {
+        playerDeckCount.textContent = `${getPlayerDeckCount(renderedState, index)}/${getPlayerDeckTotal(renderedState)}`;
+      }
+
+      if (playerDeckStat) {
+        playerDeckStat.hidden = renderedState.deckMode !== DECK_MODES.SEPARATE;
+      }
 
       if (playerNameButton) {
         playerNameButton.textContent = isAiControlledPlayer(renderedState, index) ? `${player.nome} (IA)` : player.nome;
@@ -1919,6 +2191,9 @@
             && !state.winner
             && card.vida < card.vidaBase;
 
+          const canEnterDefense = matchStarted && !viewingHistory && !aiTurnActive && canUnitEnterDefense(state, index, card);
+          const canCancelDefense = matchStarted && !viewingHistory && !aiTurnActive && canUnitCancelDefense(state, index, card);
+
           return createCardElement(card, {
             interactive: canSelect || canBeCombatTargeted || canBeDamageEffectTargeted || canBeHealingEffectTargeted,
             selected: isSelected,
@@ -1935,7 +2210,21 @@
               }
               render(state);
             },
-            player
+            player,
+            defenseToggle: (canEnterDefense || canCancelDefense)
+              ? {
+                interactive: true,
+                active: canCancelDefense,
+                onClick: () => {
+                  if (canCancelDefense) {
+                    cancelDefenseMode(state, index, card.instanceId);
+                  } else {
+                    enterDefenseMode(state, index, card.instanceId);
+                  }
+                  render(state);
+                }
+              }
+              : null
           });
         },
         "Nenhuma unidade em campo."
@@ -1998,8 +2287,8 @@
             ? "Escolha unidade, suporte exposto ou clique no nome do rival para atacar o jogador. Clique novamente na unidade para cancelar."
             : "Escolha uma unidade inimiga ou clique no nome do rival para atacar o jogador. Clique novamente na unidade para cancelar."
           : "Use sua mana, baixe cartas e ataque com unidades prontas.";
-    document.getElementById("deck-count").textContent = `${renderedState.deck.length}/${getTotalDeckSize()}`;
-    document.getElementById("discard-count").textContent = String(renderedState.discardPile.length);
+    document.getElementById("deck-count").textContent = `${getGlobalDeckCount(renderedState)}/${getTotalDeckSize(renderedState.deckMode === DECK_MODES.SEPARATE ? DECK_MODES.SEPARATE : DECK_MODES.SHARED)}`;
+    document.getElementById("discard-count").textContent = String(getGlobalDiscardCount(renderedState));
     document.getElementById("attacks-left").textContent = String(getAvailableAttackers(currentPlayer).length);
     document.getElementById("winner-banner").textContent = state.winner ? `${state.winner.nome} venceu` : "Sem vencedor";
 
@@ -2013,6 +2302,10 @@
     const toggleLogButton = document.getElementById("toggle-log-button");
     const startButton = document.getElementById("start-button");
     const restartButton = document.getElementById("restart-button");
+    const sharedDeckButton = document.getElementById("deck-mode-shared");
+    const separateDeckButton = document.getElementById("deck-mode-separate");
+    const configPanel = document.getElementById("match-config-panel");
+    const sharedDeckStat = document.getElementById("shared-deck-stat");
     const anySidePanelOpen = isAnySidePanelOpen(state);
 
     if (boardElement && sideRail && libraryPanel && rulesPanel && logPanel && toggleLibraryButton && toggleRulesButton && toggleLogButton) {
@@ -2059,6 +2352,28 @@
     if (restartButton) {
       restartButton.hidden = !state.isMatchStarted;
       restartButton.disabled = !state.isMatchStarted;
+    }
+
+    if (sharedDeckButton) {
+      const isSelected = state.deckMode === DECK_MODES.SHARED;
+      sharedDeckButton.disabled = state.isMatchStarted;
+      sharedDeckButton.classList.toggle("is-selected", isSelected);
+      sharedDeckButton.setAttribute("aria-pressed", String(isSelected));
+    }
+
+    if (separateDeckButton) {
+      const isSelected = state.deckMode === DECK_MODES.SEPARATE;
+      separateDeckButton.disabled = state.isMatchStarted;
+      separateDeckButton.classList.toggle("is-selected", isSelected);
+      separateDeckButton.setAttribute("aria-pressed", String(isSelected));
+    }
+
+    if (configPanel) {
+      configPanel.classList.toggle("is-locked", state.isMatchStarted);
+    }
+
+    if (sharedDeckStat) {
+      sharedDeckStat.hidden = renderedState.deckMode === DECK_MODES.SEPARATE;
     }
 
     const turnActionsPanel = document.getElementById("player-turn-actions-panel");
@@ -2118,7 +2433,7 @@
     const drawButton = document.getElementById("draw-button");
     const endTurnButton = document.getElementById("end-turn-button");
 
-    drawButton.disabled = !state.isMatchStarted || viewingHistory || aiTurnActive || Boolean(state.winner) || Boolean(state.selectedAttackerId) || Boolean(state.selectedEffectCard) || !state.deck.length || !canAfford(getCurrentPlayer(state), DRAW_COST);
+    drawButton.disabled = !state.isMatchStarted || viewingHistory || aiTurnActive || Boolean(state.winner) || Boolean(state.selectedAttackerId) || Boolean(state.selectedEffectCard) || !getDrawPile(state, state.currentPlayerIndex).length || !canAfford(getCurrentPlayer(state), DRAW_COST);
     endTurnButton.disabled = !state.isMatchStarted || viewingHistory || aiTurnActive || Boolean(state.winner);
     endTurnButton.classList.toggle("ready-to-end-turn", state.isMatchStarted && !viewingHistory && !aiTurnActive && !state.winner && !availableActions.hasAny);
 
@@ -2152,7 +2467,7 @@
       });
     }
 
-    renderLibrary(state);
+    renderLibrary(renderedState);
 
     document.getElementById("player-bottom-panel").classList.toggle("active", matchStarted && renderedState.currentPlayerIndex === 0 && !renderedState.winner);
     document.getElementById("player-top-panel").classList.toggle("active", matchStarted && renderedState.currentPlayerIndex === 1 && !renderedState.winner);
@@ -2206,6 +2521,17 @@
         const playerIndex = Number(button.dataset.playerIndex);
         const controller = button.dataset.controller;
         gameState.playerControllers = setSessionPlayerController(playerIndex, controller);
+        render(gameState);
+      });
+    });
+
+    document.querySelectorAll("[data-deck-mode-button]").forEach((button) => {
+      button.addEventListener("click", () => {
+        if (gameState.isMatchStarted) {
+          return;
+        }
+
+        gameState.deckMode = setSessionDeckMode(button.dataset.deckMode);
         render(gameState);
       });
     });
@@ -2293,11 +2619,15 @@
       MAX_MANA,
       DRAW_COST,
       CARD_COPIES_PER_TYPE,
+      SEPARATE_DECK_COPIES_PER_TYPE,
       AI_STEP_DELAY_MS,
+      DECK_MODES,
       PLAYER_CONTROLLER_TYPES,
       CARD_LIBRARY,
       getSessionPlayerControllers,
       setSessionPlayerController,
+      getSessionDeckMode,
+      setSessionDeckMode,
       createDeck,
       shuffleDeck,
       createInitialState,
@@ -2344,7 +2674,18 @@
       getNextAiAction,
       performAiStep,
       getUnitAttack,
-      getAvailableAttackers
+      getAvailableAttackers,
+      getDrawPile,
+      getDiscardPileForPlayer,
+      getPlayerDeckCount,
+      getPlayerDeckTotal,
+      getGlobalDeckCount,
+      getGlobalDiscardCount,
+      enterDefenseMode,
+      cancelDefenseMode,
+      canUnitEnterDefense,
+      canUnitCancelDefense,
+      getMitigatedDamage
     };
   }
 })();

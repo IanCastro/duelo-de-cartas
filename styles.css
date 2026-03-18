@@ -55,6 +55,41 @@ select {
   gap: 10px;
 }
 
+.match-config-panel {
+  margin-bottom: 20px;
+  padding: 18px 20px;
+  border: 1px solid var(--line);
+  border-radius: 28px;
+  background: var(--panel);
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(14px);
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.match-config-panel.is-locked {
+  opacity: 0.92;
+}
+
+.match-config-copy h2 {
+  margin: 6px 0 0;
+  font-size: clamp(1.4rem, 2.3vw, 1.9rem);
+}
+
+.match-config-copy p:last-child,
+.match-config-copy .turn-label + h2 + p {
+  margin: 8px 0 0;
+  color: var(--muted);
+}
+
+.match-config-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px;
+  align-items: stretch;
+}
+
 .controller-picker {
   padding: 10px 14px;
   border: 1px solid rgba(255, 255, 255, 0.12);
@@ -107,6 +142,15 @@ select {
 .start-toggle {
   border-color: rgba(244, 184, 96, 0.4);
   background: rgba(244, 184, 96, 0.16);
+}
+
+.match-config-actions {
+  display: flex;
+  align-items: stretch;
+}
+
+.match-config-actions .action-button {
+  min-height: 100%;
 }
 
 .eyebrow {
@@ -260,7 +304,7 @@ select {
 
 .player-summary {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto auto auto;
+  grid-template-columns: minmax(0, 1fr) auto auto auto auto;
   align-items: start;
   gap: 12px;
 }
@@ -797,12 +841,74 @@ select {
   text-align: center;
 }
 
-.zone .card,
-.typed-hand .card,
-.player-pending-slot .card {
+.card-entry {
+  position: relative;
   flex: 0 1 168px;
   width: min(100%, 168px);
   max-width: 168px;
+}
+
+.card-entry .card {
+  width: 100%;
+}
+
+.zone .card-entry,
+.typed-hand .card-entry,
+.player-pending-slot .card-entry {
+  flex: 0 1 168px;
+  width: min(100%, 168px);
+  max-width: 168px;
+}
+
+.card-defense-toggle {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  z-index: 2;
+  min-width: 42px;
+  padding: 6px 8px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 999px;
+  background: rgba(8, 18, 21, 0.82);
+  color: var(--text);
+  cursor: pointer;
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.card-defense-toggle.is-active {
+  border-color: rgba(143, 244, 209, 0.4);
+  background: rgba(70, 201, 162, 0.22);
+}
+
+.card-defense-toggle:disabled {
+  opacity: 0.52;
+  cursor: not-allowed;
+}
+
+.card-entry.is-defending {
+  min-height: 244px;
+}
+
+.card-entry.is-defending .card {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 216px;
+  max-width: none;
+  transform: translate(-50%, -50%) rotate(90deg) scale(0.78);
+  transform-origin: center;
+}
+
+.card.defending {
+  border-color: rgba(143, 244, 209, 0.44);
+  box-shadow: 0 0 0 1px rgba(143, 244, 209, 0.18);
+}
+
+.card.defending.disabled {
+  opacity: 1;
 }
 
 .typed-hand .card {
@@ -1066,6 +1172,10 @@ select {
     grid-template-columns: 1fr;
   }
 
+  .match-config-grid {
+    grid-template-columns: 1fr;
+  }
+
   .player-summary {
     grid-template-columns: auto auto minmax(0, 1fr);
   }
@@ -1114,16 +1224,6 @@ select {
     align-items: flex-start;
   }
 
-  .game-mode-picker {
-    width: 100%;
-    justify-content: space-between;
-  }
-
-  .game-mode-picker select {
-    min-width: 0;
-    flex: 1 1 auto;
-  }
-
   .hero-toggles {
     width: 100%;
   }
@@ -1131,5 +1231,9 @@ select {
   .library-toggle {
     flex: 1;
     min-width: 0;
+  }
+
+  .match-config-panel {
+    padding: 16px;
   }
 }
