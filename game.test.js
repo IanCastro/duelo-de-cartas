@@ -2163,6 +2163,127 @@ test("rewind to a lethal attack entry should preserve the winner state", () => {
   assert(rewound.isWinnerModalOpen === true, "rewind should preserve the winner modal state on the lethal attack line");
 });
 
+test("lethal player attack logs a single final line with the winner embedded", () => {
+  const state = createStartedState();
+  state.players[1].vida = 2;
+  state.players[0].manaAtual = 1;
+  state.players[0].manaMax = 1;
+  Object.assign(state.players[0].hand[0], {
+    id: "atk",
+    nome: "Finalizador",
+    categoria: "unidade",
+    custo: 1,
+    ataque: 4,
+    vida: 3,
+    vidaBase: 3,
+    descricao: ""
+  });
+
+  const attackerInstanceId = state.players[0].hand[0].instanceId;
+  state.log[0].snapshot.players[1].vida = 2;
+
+  game.playCard(state, 0, attackerInstanceId);
+  game.selectAttacker(state, 0, attackerInstanceId);
+  game.attackTarget(state, 0, "player");
+
+  const lastEntry = state.log[state.log.length - 1];
+
+  assert(state.log.length === 3, "lethal attack should only add the summon and the lethal attack lines");
+  assert(lastEntry.event.kind === game.LOG_EVENT_TYPES.ATTACK_PLAYER, "last log entry should stay on the lethal attack event");
+  assert(lastEntry.event.winnerPlayerId === 1, "lethal attack entry should embed the winner");
+  assert(lastEntry.snapshot.winnerPlayerId === 1, "lethal attack snapshot should already preserve the winner");
+  assert(lastEntry.snapshot.players[1].vida === 0, "lethal attack snapshot should already preserve the defeated player life");
+  assert(state.log.every((entry) => entry.event?.kind !== game.LOG_EVENT_TYPES.VICTORY), "lethal attack should not create a separate victory log line");
+});
+
+test("lethal direct damage logs a single final line with the winner embedded", () => {
+  const state = createStartedState();
+  state.players[1].vida = 3;
+  state.players[0].manaAtual = 1;
+  state.players[0].manaMax = 1;
+  Object.assign(state.players[0].hand[0], {
+    id: "bolt",
+    nome: "Raio Arcano",
+    categoria: "efeito",
+    custo: 1,
+    efeito: "dano_direto",
+    valor: 3,
+    descricao: ""
+  });
+
+  const effectInstanceId = state.players[0].hand[0].instanceId;
+  state.log[0].snapshot.players[1].vida = 3;
+
+  game.playCard(state, 0, effectInstanceId);
+  game.resolveEffectTarget(state, 0, "player");
+
+  const lastEntry = state.log[state.log.length - 1];
+
+  assert(state.log.length === 2, "lethal direct damage should only add its own final log line");
+  assert(lastEntry.event.kind === game.LOG_EVENT_TYPES.EFFECT_DAMAGE_PLAYER, "last log entry should stay on the lethal damage event");
+  assert(lastEntry.event.winnerPlayerId === 1, "lethal direct damage entry should embed the winner");
+  assert(lastEntry.snapshot.winnerPlayerId === 1, "lethal direct damage snapshot should already preserve the winner");
+  assert(lastEntry.snapshot.selectedEffectCard === null, "lethal direct damage snapshot should already be fully settled");
+  assert(lastEntry.snapshot.players[1].vida === 0, "lethal direct damage snapshot should already preserve the defeated player life");
+  assert(state.log.every((entry) => entry.event?.kind !== game.LOG_EVENT_TYPES.VICTORY), "lethal direct damage should not create a separate victory log line");
+});
+
+test("log validator passes after a lethal player attack", () => {
+  const state = createStartedState();
+  state.players[1].vida = 2;
+  state.players[0].manaAtual = 1;
+  state.players[0].manaMax = 1;
+  Object.assign(state.players[0].hand[0], {
+    id: "atk",
+    nome: "Finalizador",
+    categoria: "unidade",
+    custo: 1,
+    ataque: 4,
+    vida: 3,
+    vidaBase: 3,
+    descricao: ""
+  });
+
+  const attackerInstanceId = state.players[0].hand[0].instanceId;
+  state.log[0].snapshot = snapshotStateForValidation(state);
+
+  game.playCard(state, 0, attackerInstanceId);
+  game.selectAttacker(state, 0, attackerInstanceId);
+  game.attackTarget(state, 0, "player");
+
+  const result = game.validateMatchLog(state.log);
+
+  assert(result.status === game.LOG_VALIDATION_STATUS.VALID, "lethal player attack histories should validate successfully");
+  assert(result.validatedEntryCount === state.log.length, "lethal player attack validation should cover every line");
+});
+
+test("log validator passes after lethal direct damage on the player", () => {
+  const state = createStartedState();
+  state.players[1].vida = 3;
+  state.players[0].manaAtual = 1;
+  state.players[0].manaMax = 1;
+  Object.assign(state.players[0].hand[0], {
+    id: "bolt",
+    nome: "Raio Arcano",
+    categoria: "efeito",
+    custo: 1,
+    efeito: "dano_direto",
+    valor: 3,
+    descricao: ""
+  });
+
+  const effectInstanceId = state.players[0].hand[0].instanceId;
+  state.log[0].snapshot = snapshotStateForValidation(state);
+
+  game.playCard(state, 0, effectInstanceId);
+  game.resolveEffectTarget(state, 0, "player");
+
+  const result = game.validateMatchLog(state.log);
+
+  assert(result.status === game.LOG_VALIDATION_STATUS.VALID, "lethal direct-damage histories should validate successfully");
+  assert(result.validatedEntryCount === state.log.length, "lethal direct-damage validation should cover every line");
+});
+
 test("log display helper shows the newest entry first without renumbering", () => {
   const displayed = game.getDisplayLogEntries([
     { id: 1, numero: 1, texto: "Primeira" },

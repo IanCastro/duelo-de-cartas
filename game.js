@@ -708,6 +708,21 @@
       ? state.players[event.targetPlayerIndex]
       : null;
 
+    function applyLoggedWinner() {
+      if (!event.winnerPlayerId) {
+        return { ok: true };
+      }
+
+      const winnerIndex = getPlayerIndexById(state, event.winnerPlayerId);
+      if (winnerIndex === -1) {
+        return { ok: false, code: "invalid-victory-player", message: "O evento referencia um vencedor inexistente." };
+      }
+
+      state.winner = state.players[winnerIndex];
+      state.isWinnerModalOpen = true;
+      return { ok: true };
+    }
+
     switch (event.kind) {
       case LOG_EVENT_TYPES.MATCH_START:
         return { ok: true };
@@ -798,9 +813,16 @@
           return { ok: false, code: "damage-mismatch", message: "O dano registrado no evento nao bate com o valor do efeito." };
         }
 
-        state.selectedEffectCard = cloneData(card);
         opponent.vida = Math.max(opponent.vida - event.damage, 0);
-        return { ok: true };
+        moveCardToDiscardForOwner(state, card, event.playerIndex);
+        state.selectedEffectCard = null;
+        state.selectedAttackerId = null;
+
+        if (opponent.vida <= 0 && !event.winnerPlayerId) {
+          return { ok: false, code: "missing-effect-victory", message: "O dano direto foi letal, mas o evento nao registrou o vencedor." };
+        }
+
+        return applyLoggedWinner();
       }
 
       case LOG_EVENT_TYPES.EFFECT_DAMAGE_UNIT: {
@@ -823,7 +845,6 @@
           return { ok: false, code: "effect-unit-damage-mismatch", message: "O dano efetivo do evento nao bate com o dano calculado no replay." };
         }
 
-        state.selectedEffectCard = cloneData(card);
         target.vida = Math.max(target.vida - event.damage, 0);
         if (event.defeated) {
           removeCardByInstanceId(opponent.board, event.targetInstanceId);
@@ -832,6 +853,9 @@
           return { ok: false, code: "effect-unit-defeat-mismatch", message: "O replay derrotou a unidade, mas o evento nao marcou derrota." };
         }
 
+        moveCardToDiscardForOwner(state, card, event.playerIndex);
+        state.selectedEffectCard = null;
+        state.selectedAttackerId = null;
         return { ok: true };
       }
 
@@ -855,8 +879,10 @@
           return { ok: false, code: "heal-player-mismatch", message: "A cura registrada no evento nao bate com a cura calculada no replay." };
         }
 
-        state.selectedEffectCard = cloneData(card);
         targetPlayer.vida = Math.min(targetPlayer.vida + card.valor, MAX_HEALTH);
+        moveCardToDiscardForOwner(state, card, event.playerIndex);
+        state.selectedEffectCard = null;
+        state.selectedAttackerId = null;
         return { ok: true };
       }
 
@@ -880,8 +906,10 @@
           return { ok: false, code: "heal-unit-mismatch", message: "A cura registrada no evento nao bate com a cura calculada no replay." };
         }
 
-        state.selectedEffectCard = cloneData(card);
         target.vida = Math.min(target.vida + card.valor, target.vidaBase);
+        moveCardToDiscardForOwner(state, card, event.playerIndex);
+        state.selectedEffectCard = null;
+        state.selectedAttackerId = null;
         return { ok: true };
       }
 
@@ -903,7 +931,12 @@
         attacker.jaAtacouNoTurno = true;
         state.selectedAttackerId = null;
         opponent.vida = Math.max(opponent.vida - event.damage, 0);
-        return { ok: true };
+
+        if (opponent.vida <= 0 && !event.winnerPlayerId) {
+          return { ok: false, code: "missing-attack-victory", message: "O ataque foi letal, mas o evento nao registrou o vencedor." };
+        }
+
+        return applyLoggedWinner();
       }
 
       case LOG_EVENT_TYPES.ATTACK_SUPPORT: {
@@ -1006,41 +1039,12 @@
         return { ok: true };
       }
 
-      case LOG_EVENT_TYPES.VICTORY: {
-        const winnerIndex = getPlayerIndexById(state, event.winnerPlayerId);
-        if (winnerIndex === -1) {
-          return { ok: false, code: "invalid-victory-player", message: "O evento de vitoria referencia um jogador inexistente." };
-        }
-
-        state.winner = state.players[winnerIndex];
-        state.isWinnerModalOpen = true;
-        return { ok: true };
-      }
+      case LOG_EVENT_TYPES.VICTORY:
+        return applyLoggedWinner();
 
       default:
         return { ok: false, code: "unknown-event-kind", message: `Tipo de evento desconhecido: ${event.kind}.` };
     }
-  }
-
-  function settleReplayStateAfterLoggedEvent(state, event) {
-    if (!state || !event) {
-      return state;
-    }
-
-    if (
-      event.kind === LOG_EVENT_TYPES.EFFECT_DAMAGE_PLAYER
-      || event.kind === LOG_EVENT_TYPES.EFFECT_DAMAGE_UNIT
-      || event.kind === LOG_EVENT_TYPES.EFFECT_HEAL_PLAYER
-      || event.kind === LOG_EVENT_TYPES.EFFECT_HEAL_UNIT
-    ) {
-      if (state.selectedEffectCard?.instanceId === event.cardInstanceId) {
-        moveCardToDiscardForOwner(state, state.selectedEffectCard, event.playerIndex);
-      }
-
-      state.selectedEffectCard = null;
-    }
-
-    return state;
   }
 
   function validateMatchLog(logEntries) {
@@ -1127,7 +1131,7 @@
           }
 
           if (getSnapshotSignature(createStateSnapshot(attemptState)) === getSnapshotSignature(entry.snapshot)) {
-            replayState = settleReplayStateAfterLoggedEvent(attemptState, entry.event);
+            replayState = attemptState;
             validatedEntryCount = entryIndex + 1;
             matched = true;
             break;
@@ -1827,13 +1831,17 @@
 
   function resolveDamageEffectOnPlayer(state, card, player, opponent) {
     opponent.vida = Math.max(opponent.vida - card.valor, 0);
-    addLog(state, `${player.nome} usou ${card.nome} e causou ${card.valor} de dano em ${opponent.nome}.`, {
-      kind: LOG_EVENT_TYPES.EFFECT_DAMAGE_PLAYER,
-      playerIndex: state.currentPlayerIndex,
-      cardInstanceId: card.instanceId,
-      targetPlayerIndex: state.players.findIndex((targetPlayer) => targetPlayer.id === opponent.id),
-      damage: card.valor
-    });
+    return {
+      message: `${player.nome} usou ${card.nome} e causou ${card.valor} de dano em ${opponent.nome}.`,
+      event: {
+        kind: LOG_EVENT_TYPES.EFFECT_DAMAGE_PLAYER,
+        playerIndex: state.currentPlayerIndex,
+        cardInstanceId: card.instanceId,
+        targetPlayerIndex: state.players.findIndex((targetPlayer) => targetPlayer.id === opponent.id),
+        damage: card.valor
+      },
+      canWin: true
+    };
   }
 
   function resolveDamageEffectOnUnit(state, card, player, opponent, targetInstanceId) {
@@ -1850,28 +1858,34 @@
     if (target.vida <= 0) {
       const [defeatedUnit] = opponent.board.splice(targetIndex, 1);
       moveCardToDiscardForOwner(state, defeatedUnit, (state.currentPlayerIndex + 1) % 2);
-      addLog(state, `${player.nome} usou ${card.nome} e causou ${inflictedDamage} de dano em ${target.nome}, derrotando a unidade.`, {
+      return {
+        message: `${player.nome} usou ${card.nome} e causou ${inflictedDamage} de dano em ${target.nome}, derrotando a unidade.`,
+        event: {
+          kind: LOG_EVENT_TYPES.EFFECT_DAMAGE_UNIT,
+          playerIndex: state.currentPlayerIndex,
+          cardInstanceId: card.instanceId,
+          targetPlayerIndex: (state.currentPlayerIndex + 1) % 2,
+          targetInstanceId: target.instanceId,
+          damage: inflictedDamage,
+          defeated: true
+        },
+        canWin: false
+      };
+    }
+
+    return {
+      message: `${player.nome} usou ${card.nome} e causou ${inflictedDamage} de dano em ${target.nome}.`,
+      event: {
         kind: LOG_EVENT_TYPES.EFFECT_DAMAGE_UNIT,
         playerIndex: state.currentPlayerIndex,
         cardInstanceId: card.instanceId,
         targetPlayerIndex: (state.currentPlayerIndex + 1) % 2,
         targetInstanceId: target.instanceId,
         damage: inflictedDamage,
-        defeated: true
-      });
-      return true;
-    }
-
-    addLog(state, `${player.nome} usou ${card.nome} e causou ${inflictedDamage} de dano em ${target.nome}.`, {
-      kind: LOG_EVENT_TYPES.EFFECT_DAMAGE_UNIT,
-      playerIndex: state.currentPlayerIndex,
-      cardInstanceId: card.instanceId,
-      targetPlayerIndex: (state.currentPlayerIndex + 1) % 2,
-      targetInstanceId: target.instanceId,
-      damage: inflictedDamage,
-      defeated: false
-    });
-    return true;
+        defeated: false
+      },
+      canWin: false
+    };
   }
 
   function resolveHealingEffectOnPlayer(state, card, player) {
@@ -1881,14 +1895,17 @@
 
     const recovered = Math.min(card.valor, MAX_HEALTH - player.vida);
     player.vida = Math.min(player.vida + card.valor, MAX_HEALTH);
-    addLog(state, `${player.nome} usou ${card.nome} e recuperou ${recovered} de vida.`, {
-      kind: LOG_EVENT_TYPES.EFFECT_HEAL_PLAYER,
-      playerIndex: state.currentPlayerIndex,
-      cardInstanceId: card.instanceId,
-      targetPlayerIndex: state.currentPlayerIndex,
-      recovered
-    });
-    return true;
+    return {
+      message: `${player.nome} usou ${card.nome} e recuperou ${recovered} de vida.`,
+      event: {
+        kind: LOG_EVENT_TYPES.EFFECT_HEAL_PLAYER,
+        playerIndex: state.currentPlayerIndex,
+        cardInstanceId: card.instanceId,
+        targetPlayerIndex: state.currentPlayerIndex,
+        recovered
+      },
+      canWin: false
+    };
   }
 
   function resolveHealingEffectOnUnit(state, card, player, targetInstanceId) {
@@ -1904,15 +1921,18 @@
 
     const recovered = Math.min(card.valor, target.vidaBase - target.vida);
     target.vida = Math.min(target.vida + card.valor, target.vidaBase);
-    addLog(state, `${player.nome} usou ${card.nome} e recuperou ${recovered} de vida em ${target.nome}.`, {
-      kind: LOG_EVENT_TYPES.EFFECT_HEAL_UNIT,
-      playerIndex: state.currentPlayerIndex,
-      cardInstanceId: card.instanceId,
-      targetPlayerIndex: state.currentPlayerIndex,
-      targetInstanceId: target.instanceId,
-      recovered
-    });
-    return true;
+    return {
+      message: `${player.nome} usou ${card.nome} e recuperou ${recovered} de vida em ${target.nome}.`,
+      event: {
+        kind: LOG_EVENT_TYPES.EFFECT_HEAL_UNIT,
+        playerIndex: state.currentPlayerIndex,
+        cardInstanceId: card.instanceId,
+        targetPlayerIndex: state.currentPlayerIndex,
+        targetInstanceId: target.instanceId,
+        recovered
+      },
+      canWin: false
+    };
   }
 
   function resolveEffectTarget(state, playerIndex, targetType, targetInstanceId) {
@@ -1924,36 +1944,40 @@
     const opponent = state.players[(playerIndex + 1) % 2];
     const card = state.selectedEffectCard;
 
-    let resolved = false;
+    let resolution = null;
 
     if (card.efeito === "dano_direto") {
       if (targetType === "player") {
-        resolveDamageEffectOnPlayer(state, card, player, opponent);
-        resolved = true;
+        resolution = resolveDamageEffectOnPlayer(state, card, player, opponent);
       }
 
       if (targetType === "unit") {
-        resolved = resolveDamageEffectOnUnit(state, card, player, opponent, targetInstanceId);
+        resolution = resolveDamageEffectOnUnit(state, card, player, opponent, targetInstanceId);
       }
     }
 
     if (card.efeito === "cura_direta") {
       if (targetType === "player") {
-        resolved = resolveHealingEffectOnPlayer(state, card, player);
+        resolution = resolveHealingEffectOnPlayer(state, card, player);
       }
 
       if (targetType === "ally-unit") {
-        resolved = resolveHealingEffectOnUnit(state, card, player, targetInstanceId);
+        resolution = resolveHealingEffectOnUnit(state, card, player, targetInstanceId);
       }
     }
 
-    if (!resolved) {
+    if (!resolution) {
       return false;
     }
 
     moveCardToDiscardForOwner(state, card, playerIndex);
     state.selectedEffectCard = null;
-    checkWinner(state);
+    const winner = resolution.canWin ? checkWinner(state) : null;
+    if (winner) {
+      resolution.event.winnerPlayerId = winner.id;
+      resolution.message = `${resolution.message} ${winner.nome} venceu a partida.`;
+    }
+    addLog(state, resolution.message, resolution.event);
     return true;
   }
 
@@ -2063,14 +2087,20 @@
 
     if (targetType === "player") {
       opponent.vida = Math.max(opponent.vida - attackValue, 0);
-      addLog(state, `${attacker.nome} atacou ${opponent.nome} e causou ${attackValue} de dano.`, {
+      const winner = checkWinner(state);
+      const event = {
         kind: LOG_EVENT_TYPES.ATTACK_PLAYER,
         playerIndex,
         attackerInstanceId: attacker.instanceId,
         targetPlayerIndex: (playerIndex + 1) % 2,
         damage: attackValue
-      });
-      checkWinner(state);
+      };
+      let message = `${attacker.nome} atacou ${opponent.nome} e causou ${attackValue} de dano.`;
+      if (winner) {
+        event.winnerPlayerId = winner.id;
+        message = `${message} ${winner.nome} venceu a partida.`;
+      }
+      addLog(state, message, event);
       return true;
     }
 
@@ -2253,6 +2283,13 @@
       return false;
     }
 
+    if (state.selectedEffectCard) {
+      if (typeof options.notifyFn === "function") {
+        options.notifyFn("Resolva ou cancele o efeito preparado antes de encerrar o turno.");
+      }
+      return false;
+    }
+
     const availableActions = getAvailableActions(state, state.currentPlayerIndex);
 
     if (availableActions.hasAny && typeof options.confirmFn === "function") {
@@ -2405,10 +2442,6 @@
 
     if (state.winner) {
       state.isWinnerModalOpen = true;
-      addLog(state, `${state.winner.nome} venceu a partida.`, {
-        kind: LOG_EVENT_TYPES.VICTORY,
-        winnerPlayerId: state.winner.id
-      });
     }
 
     return state.winner;
@@ -3495,7 +3528,8 @@
 
     document.getElementById("end-turn-button").addEventListener("click", () => {
       handleShortcutAction(gameState, "e", {
-        confirmFn: typeof window !== "undefined" ? window.confirm.bind(window) : null
+        confirmFn: typeof window !== "undefined" ? window.confirm.bind(window) : null,
+        notifyFn: typeof window !== "undefined" ? window.alert.bind(window) : null
       });
       render(gameState);
     });
@@ -3525,7 +3559,8 @@
       const didHandle = handleShortcutAction(gameState, event.key, {
         repeat: event.repeat,
         target: event.target,
-        confirmFn: typeof window !== "undefined" ? window.confirm.bind(window) : null
+        confirmFn: typeof window !== "undefined" ? window.confirm.bind(window) : null,
+        notifyFn: typeof window !== "undefined" ? window.alert.bind(window) : null
       });
 
       if (!didHandle) {

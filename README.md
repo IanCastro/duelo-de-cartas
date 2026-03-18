@@ -35,13 +35,9 @@ $script | node -
 
 ## Resultado esperado dos testes
 
-Hoje a suite inclui testes de regressao que expoem bugs conhecidos. Entao, neste momento, o resultado esperado nao e totalmente verde.
+A suite deve terminar verde ao rodar `.\run-tests.bat`.
 
-Atualmente existem testes que falham de proposito para demonstrar:
-
-- perda de carta ao encerrar o turno com um efeito armado
-- rewind inconsistente em linha de efeito ja resolvido
-- rewind inconsistente em linha de ataque letal
+Se algum teste falhar, o ideal e usar a mensagem do erro para localizar a regra quebrada em [game.js](./game.js) ou o cenario correspondente em [game.test.js](./game.test.js).
 
 ## Estrutura principal
 
