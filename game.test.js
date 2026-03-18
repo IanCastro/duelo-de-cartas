@@ -1775,6 +1775,16 @@ test("log validator also passes on shared deck mode", () => {
   assert(result.validatedEntryCount === state.log.length, "shared-deck validation should cover every line");
 });
 
+test("log validator ignores side menu visibility changes between logged actions", () => {
+  const state = createStartedState();
+  state.isLogOpen = true;
+  game.drawTurnCard(state, 0);
+
+  const result = game.validateMatchLog(state.log);
+
+  assert(result.status === game.LOG_VALIDATION_STATUS.VALID, "side menu visibility should not invalidate an otherwise correct log replay");
+});
+
 test("log validator passes after a logged end-of-turn support heal", () => {
   const state = createStartedState();
   Object.assign(state.players[0].hand[0], {

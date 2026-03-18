@@ -571,7 +571,15 @@
   }
 
   function getSnapshotSignature(snapshot) {
-    return JSON.stringify(snapshot);
+    if (!snapshot) {
+      return "null";
+    }
+
+    const normalizedSnapshot = cloneData(snapshot);
+    delete normalizedSnapshot.isLibraryOpen;
+    delete normalizedSnapshot.isRulesOpen;
+    delete normalizedSnapshot.isLogOpen;
+    return JSON.stringify(normalizedSnapshot);
   }
 
   function validateSnapshotIntegrity(snapshot, entry) {
