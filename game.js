@@ -3311,6 +3311,7 @@
 
     if (configPanel) {
       configPanel.hidden = state.isMatchStarted;
+      configPanel.setAttribute("aria-hidden", String(state.isMatchStarted));
       configPanel.classList.toggle("is-locked", state.isMatchStarted);
     }
 

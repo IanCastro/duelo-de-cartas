@@ -1434,6 +1434,7 @@ test("layout markup removes the cancel button and keeps a pending effect slot", 
   assert(!html.includes("id=\"rewind-history-button\""), "history mode should no longer render a dedicated rewind button");
   assert(!html.includes("id=\"game-mode-select\""), "the old shared mode selector should be removed");
   assert(html.includes("id=\"match-config-panel\""), "the page should render a dedicated pre-game configuration panel");
+  assert(fs.readFileSync(path.join(process.cwd(), "styles.css"), "utf8").includes(".match-config-panel[hidden]"), "pregame panel should have an explicit hidden style hook");
   assert(html.indexOf("id=\"match-config-panel\"") < html.indexOf("id=\"ai-match-strip\""), "ai-vs-ai strip should come after the pre-game config panel in the markup");
   assert(html.includes("id=\"player-1-controller-human\""), "the config panel should expose a controller toggle for player 1");
   assert(html.includes("id=\"player-2-controller-ai\""), "the config panel should expose a controller toggle for player 2");

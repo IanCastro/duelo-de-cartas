@@ -88,6 +88,10 @@ select {
   gap: 16px;
 }
 
+.match-config-panel[hidden] {
+  display: none !important;
+}
+
 .match-config-panel.is-locked {
   opacity: 0.92;
 }
