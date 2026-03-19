@@ -33,6 +33,11 @@
       </div>
     </header>
 
+    <section class="ai-match-strip" id="ai-match-strip" hidden aria-live="polite">
+      <button id="toggle-ai-match-button" class="action-button ghost ai-match-button" type="button">Pausar IA x IA</button>
+      <p id="ai-match-text">IA avaliando o campo.</p>
+    </section>
+
     <section class="match-config-panel" id="match-config-panel">
       <div class="match-config-copy">
         <p class="turn-label">Configuracao da partida</p>
@@ -69,75 +74,31 @@
           <button id="start-button" class="action-button" type="button">Start</button>
         </div>
       </div>
-
-      <div class="match-config-summary" id="match-config-summary" hidden aria-live="polite">
-        <span class="controller-picker-label">Configuracao ativa</span>
-        <div class="match-config-summary-chips">
-          <span class="match-config-summary-chip">
-            <span class="match-config-summary-key">J1</span>
-            <strong id="match-summary-player-1">Humano</strong>
-          </span>
-          <span class="match-config-summary-chip">
-            <span class="match-config-summary-key">J2</span>
-            <strong id="match-summary-player-2">IA</strong>
-          </span>
-          <span class="match-config-summary-chip">
-            <span class="match-config-summary-key">Baralho</span>
-            <strong id="match-summary-deck-mode">Separado</strong>
-          </span>
-        </div>
-      </div>
-    </section>
-
-    <section class="top-game-bar">
-      <div class="top-game-status">
-        <p class="turn-label">Turno atual</p>
-        <div class="top-game-copy">
-          <h2 id="turn-indicator">Jogador 1</h2>
-          <p id="turn-status">Escolha uma acao para este turno.</p>
-        </div>
-        <div class="ai-match-controls" id="ai-match-controls" hidden>
-          <button id="toggle-ai-match-button" class="action-button ghost ai-match-button" type="button">Pausar IA x IA</button>
-        </div>
-      </div>
-
-      <div class="top-game-stats">
-        <div class="deck-stat" id="shared-deck-stat">
-          <span>Baralho</span>
-          <strong id="deck-count">0/32</strong>
-        </div>
-        <div class="deck-stat">
-          <span>Descarte</span>
-          <strong id="discard-count">0</strong>
-        </div>
-        <div class="deck-stat">
-          <span>Ataques livres</span>
-          <strong id="attacks-left">0</strong>
-        </div>
-      </div>
     </section>
 
     <section class="board">
       <article class="player-panel" id="player-top-panel">
         <div class="player-summary">
-          <div class="player-heading">
-            <p class="player-label">Jogador 2</p>
+          <div class="player-heading-row">
             <button id="player-2-name" class="player-name-button" type="button" data-player-index="1">Guardiao Rubro</button>
+            <span id="player-2-controller-chip" class="player-controller-chip">IA</span>
+          </div>
+          <div class="player-summary-row">
             <span id="player-2-target-hint" class="player-target-hint" hidden></span>
+            <div class="stat" id="player-2-deck-stat">
+              <span class="stat-label">Baralho</span>
+              <strong id="player-2-deck-count">0/16</strong>
+            </div>
+            <div class="stat">
+              <span class="stat-label">Vida</span>
+              <strong id="player-2-health">40/40</strong>
+            </div>
+            <div class="stat">
+              <span class="stat-label">Mana</span>
+              <strong id="player-2-mana">0/0</strong>
+            </div>
+            <div class="player-turn-actions-slot" id="player-2-turn-actions-slot" hidden></div>
           </div>
-          <div class="stat">
-            <span class="stat-label">Vida</span>
-            <strong id="player-2-health">40/40</strong>
-          </div>
-          <div class="stat">
-            <span class="stat-label">Mana</span>
-            <strong id="player-2-mana">0/0</strong>
-          </div>
-          <div class="stat" id="player-2-deck-stat" hidden>
-            <span class="stat-label">Baralho</span>
-            <strong id="player-2-deck-count">0/16</strong>
-          </div>
-          <div class="player-turn-actions-slot" id="player-2-turn-actions-slot" hidden></div>
         </div>
 
         <div class="player-pending-slot" id="player-2-pending-slot" hidden></div>
@@ -193,24 +154,26 @@
 
       <article class="player-panel active" id="player-bottom-panel">
         <div class="player-summary">
-          <div class="player-heading">
-            <p class="player-label">Jogador 1</p>
+          <div class="player-heading-row">
             <button id="player-1-name" class="player-name-button" type="button" data-player-index="0">Sentinela Azul</button>
+            <span id="player-1-controller-chip" class="player-controller-chip">Humano</span>
+          </div>
+          <div class="player-summary-row">
             <span id="player-1-target-hint" class="player-target-hint" hidden></span>
+            <div class="stat" id="player-1-deck-stat">
+              <span class="stat-label">Baralho</span>
+              <strong id="player-1-deck-count">0/16</strong>
+            </div>
+            <div class="stat">
+              <span class="stat-label">Vida</span>
+              <strong id="player-1-health">40/40</strong>
+            </div>
+            <div class="stat">
+              <span class="stat-label">Mana</span>
+              <strong id="player-1-mana">0/0</strong>
+            </div>
+            <div class="player-turn-actions-slot" id="player-1-turn-actions-slot"></div>
           </div>
-          <div class="stat">
-            <span class="stat-label">Vida</span>
-            <strong id="player-1-health">40/40</strong>
-          </div>
-          <div class="stat">
-            <span class="stat-label">Mana</span>
-            <strong id="player-1-mana">0/0</strong>
-          </div>
-          <div class="stat" id="player-1-deck-stat" hidden>
-            <span class="stat-label">Baralho</span>
-            <strong id="player-1-deck-count">0/16</strong>
-          </div>
-          <div class="player-turn-actions-slot" id="player-1-turn-actions-slot"></div>
         </div>
 
         <div class="player-pending-slot" id="player-1-pending-slot" hidden></div>

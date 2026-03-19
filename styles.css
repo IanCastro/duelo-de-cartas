@@ -92,18 +92,6 @@ select {
   opacity: 0.92;
 }
 
-.match-config-panel.is-collapsed {
-  padding: 12px 16px;
-  gap: 8px;
-  border-radius: 22px;
-  background: rgba(15, 33, 38, 0.88);
-}
-
-.match-config-panel.is-collapsed .match-config-copy,
-.match-config-panel.is-collapsed .match-config-grid {
-  display: none;
-}
-
 .match-config-copy h2 {
   margin: 4px 0 0;
   font-size: clamp(1.18rem, 1.8vw, 1.55rem);
@@ -188,46 +176,6 @@ select {
   padding: 12px 14px;
 }
 
-.match-config-summary[hidden] {
-  display: none !important;
-}
-
-.match-config-summary {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px 14px;
-  flex-wrap: wrap;
-}
-
-.match-config-summary-chips {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-
-.match-config-summary-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  min-height: 38px;
-  padding: 8px 12px;
-  border-radius: 999px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  background: rgba(255, 255, 255, 0.06);
-}
-
-.match-config-summary-key {
-  color: var(--muted);
-  font-size: 0.74rem;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
-
-.match-config-summary-chip strong {
-  font-size: 0.94rem;
-}
-
 .eyebrow {
   margin: 0 0 8px;
   font-size: 0.8rem;
@@ -269,7 +217,7 @@ select {
   background: rgba(244, 184, 96, 0.12);
 }
 
-.top-game-bar,
+.ai-match-strip,
 .player-panel,
 .side-panel {
   border: 1px solid var(--line);
@@ -279,63 +227,33 @@ select {
   backdrop-filter: blur(14px);
 }
 
-.top-game-bar {
-  margin-bottom: 16px;
-  padding: 12px 16px;
-  display: flex;
-  flex-wrap: wrap;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 12px 16px;
-}
-
-.top-game-bar.is-match-started {
-  padding-block: 10px 12px;
-}
-
-.top-game-status {
-  flex: 1.2;
-  min-width: 280px;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.ai-match-controls[hidden] {
+.ai-match-strip[hidden] {
   display: none !important;
-}
-
-.ai-match-controls {
-  display: flex;
-  align-items: center;
-  gap: 10px;
 }
 
 .ai-match-button {
   width: auto;
-  min-width: 150px;
+  min-width: 138px;
   padding: 8px 12px;
   border-radius: 14px;
 }
 
-.top-game-copy {
+.ai-match-strip {
+  margin-bottom: 12px;
+  padding: 10px 14px;
   display: flex;
-  flex-direction: column;
-  gap: 4px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
 }
 
-.top-game-copy h2 {
+.ai-match-strip p {
   margin: 0;
-  font-size: clamp(1.32rem, 2vw, 1.85rem);
-  line-height: 1;
-}
-
-.top-game-stats {
   flex: 1;
-  min-width: 260px;
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 10px;
+  min-width: 280px;
+  color: var(--muted);
+  line-height: 1.4;
 }
 
 .board {
@@ -400,10 +318,9 @@ select {
 }
 
 .player-summary {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto auto auto auto;
-  align-items: start;
-  gap: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
 }
 
 .hand-meta,
@@ -413,12 +330,12 @@ select {
   gap: 12px;
 }
 
-.player-heading {
+.player-heading-row {
   display: flex;
-  flex-direction: column;
-  gap: 4px;
+  align-items: center;
+  gap: 10px;
   min-width: 0;
-  flex: 1 1 auto;
+  flex-wrap: wrap;
 }
 
 .player-label,
@@ -467,8 +384,29 @@ select {
   text-shadow: 0 0 18px rgba(127, 231, 195, 0.3);
 }
 
+.player-controller-chip {
+  display: inline-flex;
+  align-items: center;
+  min-height: 28px;
+  padding: 5px 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--muted);
+  font-size: 0.74rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.player-summary-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
 .player-target-hint {
-  min-height: 1.1rem;
   color: var(--accent);
   font-size: 0.72rem;
   font-weight: 700;
@@ -481,10 +419,10 @@ select {
 }
 
 .stat {
-  min-width: 96px;
-  padding: 10px 12px;
+  min-width: 92px;
+  padding: 8px 10px;
   text-align: center;
-  border-radius: 18px;
+  border-radius: 16px;
   background: rgba(255, 255, 255, 0.04);
   border: 1px solid rgba(255, 255, 255, 0.07);
   flex: 0 0 auto;
@@ -492,8 +430,8 @@ select {
 
 .stat strong {
   display: block;
-  font-size: 1rem;
-  margin-top: 4px;
+  font-size: 0.96rem;
+  margin-top: 2px;
 }
 
 .player-turn-actions-slot[hidden],
@@ -504,7 +442,7 @@ select {
 
 .player-turn-actions-slot {
   flex: 0 0 auto;
-  justify-self: end;
+  margin-left: auto;
 }
 
 .player-turn-actions {
@@ -569,12 +507,6 @@ select {
   align-content: flex-start;
 }
 
-#turn-status {
-  margin: 0;
-  color: var(--muted);
-  line-height: 1.4;
-}
-
 .action-button {
   width: 100%;
   min-width: 0;
@@ -621,25 +553,6 @@ select {
   align-items: center;
   justify-content: center;
   font-weight: 700;
-}
-
-.deck-stat {
-  min-width: 0;
-  padding: 10px 12px;
-  border-radius: 16px;
-  background: var(--panel-strong);
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.deck-stat span {
-  color: var(--muted);
-  font-size: 0.82rem;
-}
-
-.deck-stat strong {
-  font-size: 1.08rem;
 }
 
 .rules-panel p {
@@ -1343,16 +1256,8 @@ select {
 }
 
 @media (max-width: 1180px) {
-  .player-summary {
-    grid-template-columns: auto auto minmax(0, 1fr);
-  }
-
-  .player-heading {
-    grid-column: 1 / -1;
-  }
-
   .player-turn-actions-slot {
-    justify-self: end;
+    margin-left: 0;
   }
 }
 
@@ -1366,14 +1271,9 @@ select {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  .player-summary {
-    grid-template-columns: auto auto minmax(0, 1fr);
-  }
-
   .player-turn-actions-slot {
-    grid-column: 1 / -1;
-    justify-self: stretch;
     width: 100%;
+    margin-left: 0;
   }
 
   .player-turn-actions {
@@ -1383,7 +1283,6 @@ select {
 }
 
 @media (max-width: 820px) {
-  .top-game-stats,
   .history-preview-meta {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -1406,6 +1305,10 @@ select {
 
   .player-turn-actions .compact-action-button {
     width: 48px;
+  }
+
+  .ai-match-strip {
+    align-items: stretch;
   }
 }
 

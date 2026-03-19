@@ -1423,6 +1423,8 @@ test("layout markup removes the cancel button and keeps a pending effect slot", 
   assert(html.includes("player-1-pending-slot"), "active player area should expose a pending effect slot");
   assert(html.includes("player-2-pending-slot"), "inactive player area should expose a pending effect slot");
   assert(!html.includes("id=\"mana-display\""), "top bar should no longer render redundant mana");
+  assert(!html.includes("class=\"top-game-bar\""), "the old second top bar should be removed from the markup");
+  assert(html.includes("id=\"ai-match-strip\""), "the page should expose a minimal ai-vs-ai strip in the top area");
   assert(html.includes("id=\"winner-modal\""), "winner modal markup should exist");
   assert(!html.includes("id=\"history-modal\""), "history preview should no longer use its own modal");
   assert(!html.includes("class=\"history-floating-panel\""), "history preview should no longer render as a floating panel");
@@ -1438,6 +1440,11 @@ test("layout markup removes the cancel button and keeps a pending effect slot", 
   assert(html.includes("id=\"deck-mode-shared\""), "the config panel should expose a shared-deck toggle");
   assert(html.includes("id=\"start-button\""), "the config panel should expose a Start button for the pre-game");
   assert(html.includes("id=\"player-1-deck-stat\""), "player panels should expose per-player deck stats");
+  assert(html.includes("id=\"player-1-controller-chip\""), "player headers should expose the controller chip for player 1");
+  assert(html.includes("id=\"player-2-controller-chip\""), "player headers should expose the controller chip for player 2");
+  assert(!html.includes("<p class=\"player-label\">Jogador 1</p>"), "player 1 header should no longer render the Jogador 1 label");
+  assert(!html.includes("<p class=\"player-label\">Jogador 2</p>"), "player 2 header should no longer render the Jogador 2 label");
+  assert(!html.includes("id=\"match-config-summary\""), "the pre-game panel should no longer keep a collapsed summary during the match");
   assert(html.includes("id=\"validate-log-button\""), "the log panel should expose a manual validation button");
   assert(html.includes("id=\"log-validation-status\""), "the log panel should expose a validation status chip");
   assert(html.includes("compact-action-button"), "turn action buttons should use the compact button style");

@@ -176,10 +176,6 @@
     return normalizePlayerController(controller) === PLAYER_CONTROLLER_TYPES.AI ? "IA" : "Humano";
   }
 
-  function getDeckModeDisplayLabel(deckMode) {
-    return normalizeDeckMode(deckMode) === DECK_MODES.SHARED ? "Compartilhado" : "Separado";
-  }
-
   function getSessionPlayerControllers() {
     return [...sessionPlayerControllers];
   }
@@ -3063,8 +3059,8 @@
     const aiTurnActive = isAiTurnActive(state);
     const renderedState = getRenderedGameState(state);
     const currentPlayer = getCurrentPlayer(renderedState);
-    const renderedCurrentPlayerIsAi = isAiControlledPlayer(renderedState, renderedState.currentPlayerIndex);
     const matchStarted = Boolean(renderedState.isMatchStarted);
+    const controllers = normalizePlayerControllers(renderedState.playerControllers);
 
     renderedState.players.forEach((player, index) => {
       const groupedHand = groupHandByCategory(player.hand);
@@ -3076,6 +3072,7 @@
       const playerDeckCount = document.getElementById(`player-${player.id}-deck-count`);
       const playerDeckStat = document.getElementById(`player-${player.id}-deck-stat`);
       const playerNameButton = document.getElementById(`player-${player.id}-name`);
+      const playerControllerChip = document.getElementById(`player-${player.id}-controller-chip`);
       const playerTargetHint = document.getElementById(`player-${player.id}-target-hint`);
       const headerTargetMode = (viewingHistory || aiTurnActive || !state.isMatchStarted) ? null : getPlayerHeaderTargetMode(state, index);
 
@@ -3084,15 +3081,19 @@
       }
 
       if (playerDeckStat) {
-        playerDeckStat.hidden = renderedState.deckMode !== DECK_MODES.SEPARATE;
+        playerDeckStat.hidden = false;
       }
 
       if (playerNameButton) {
-        playerNameButton.textContent = isAiControlledPlayer(renderedState, index) ? `${player.nome} (IA)` : player.nome;
+        playerNameButton.textContent = player.nome;
         playerNameButton.disabled = !headerTargetMode;
         playerNameButton.classList.toggle("targetable-name", Boolean(headerTargetMode));
         playerNameButton.classList.toggle("targetable-name-attack", headerTargetMode === "attack");
         playerNameButton.classList.toggle("targetable-name-heal", headerTargetMode === "heal");
+      }
+
+      if (playerControllerChip) {
+        playerControllerChip.textContent = getControllerDisplayLabel(controllers[index]);
       }
 
       if (playerTargetHint) {
@@ -3212,35 +3213,6 @@
     const availableActions = !state.isMatchStarted || viewingHistory
       ? { hasAny: false }
       : getAvailableActions(state, state.currentPlayerIndex);
-    document.getElementById("turn-indicator").textContent = !matchStarted
-      ? "Pre-jogo"
-      : renderedState.winner
-      ? `${renderedState.winner.nome} venceu`
-      : renderedCurrentPlayerIsAi
-        ? `${currentPlayer.nome} (IA)`
-        : currentPlayer.nome;
-    document.getElementById("turn-status").textContent = viewingHistory
-      ? "Visualizando um momento passado em somente leitura. Use Esc ou a linha mais recente do Log para voltar ao presente."
-      : !state.isMatchStarted
-      ? "Configure Jogador 1 e Jogador 2 como Humano ou IA e pressione Start para iniciar a partida."
-      : state.winner
-      ? "A partida terminou. Inicie uma nova partida para jogar novamente."
-      : isAiVsAiMatch(state) && state.isAiVsAiPaused
-      ? "IA x IA pausado. Use o botao de continuar para retomar a partida automatica."
-      : aiTurnActive
-      ? (state.aiStepText || "IA avaliando o campo.")
-      : state.selectedEffectCard
-        ? state.selectedEffectCard.efeito === "cura_direta"
-          ? "Escolha uma unidade aliada ferida ou clique no seu nome para curar o jogador. Clique novamente na carta armada para cancelar."
-          : "Escolha uma unidade inimiga ou clique no nome do rival para atacar diretamente o jogador. Clique novamente na carta armada para cancelar."
-        : state.selectedAttackerId
-          ? getOpponentPlayer(state).board.length === 0 && getOpponentPlayer(state).supportZone.length > 0
-            ? "Escolha unidade, suporte exposto ou clique no nome do rival para atacar o jogador. Clique novamente na unidade para cancelar."
-            : "Escolha uma unidade inimiga ou clique no nome do rival para atacar o jogador. Clique novamente na unidade para cancelar."
-          : "Use sua mana, baixe cartas e ataque com unidades prontas.";
-    document.getElementById("deck-count").textContent = `${getGlobalDeckCount(renderedState)}/${getTotalDeckSize(renderedState.deckMode === DECK_MODES.SEPARATE ? DECK_MODES.SEPARATE : DECK_MODES.SHARED)}`;
-    document.getElementById("discard-count").textContent = String(getGlobalDiscardCount(renderedState));
-    document.getElementById("attacks-left").textContent = String(getAvailableAttackers(currentPlayer).length);
     document.getElementById("winner-banner").textContent = state.winner ? `${state.winner.nome} venceu` : "Sem vencedor";
 
     const boardElement = document.querySelector(".board");
@@ -3253,19 +3225,14 @@
     const toggleLogButton = document.getElementById("toggle-log-button");
     const startButton = document.getElementById("start-button");
     const restartButton = document.getElementById("restart-button");
-    const aiMatchControls = document.getElementById("ai-match-controls");
+    const aiMatchStrip = document.getElementById("ai-match-strip");
+    const aiMatchText = document.getElementById("ai-match-text");
     const toggleAiMatchButton = document.getElementById("toggle-ai-match-button");
     const sharedDeckButton = document.getElementById("deck-mode-shared");
     const separateDeckButton = document.getElementById("deck-mode-separate");
     const configPanel = document.getElementById("match-config-panel");
-    const configSummary = document.getElementById("match-config-summary");
-    const summaryPlayerOne = document.getElementById("match-summary-player-1");
-    const summaryPlayerTwo = document.getElementById("match-summary-player-2");
-    const summaryDeckMode = document.getElementById("match-summary-deck-mode");
-    const sharedDeckStat = document.getElementById("shared-deck-stat");
     const anySidePanelOpen = isAnySidePanelOpen(state);
     const heroElement = document.querySelector(".hero");
-    const topGameBar = document.querySelector(".top-game-bar");
 
     if (boardElement && sideRail && libraryPanel && rulesPanel && logPanel && toggleLibraryButton && toggleRulesButton && toggleLogButton) {
       boardElement.classList.toggle("board-with-side-rail", anySidePanelOpen);
@@ -3313,11 +3280,19 @@
       restartButton.disabled = !state.isMatchStarted;
     }
 
-    if (aiMatchControls && toggleAiMatchButton) {
-      const showAiMatchControls = isAiVsAiMatch(state) && !viewingHistory && !state.winner;
-      aiMatchControls.hidden = !showAiMatchControls;
+    if (aiMatchStrip && toggleAiMatchButton && aiMatchText) {
+      const showAiMatchStrip = state.isMatchStarted && isAiVsAiMatch(state);
+      aiMatchStrip.hidden = !showAiMatchStrip;
       toggleAiMatchButton.textContent = state.isAiVsAiPaused ? "Continuar IA x IA" : "Pausar IA x IA";
       toggleAiMatchButton.setAttribute("aria-pressed", String(state.isAiVsAiPaused));
+
+      aiMatchText.textContent = viewingHistory
+        ? "Visualizando um momento passado em somente leitura."
+        : state.winner
+        ? `${state.winner.nome} venceu a partida.`
+        : state.isAiVsAiPaused
+        ? "IA x IA pausado. Use o botao para retomar a partida automatica."
+        : state.aiStepText || "IA avaliando o campo.";
     }
 
     if (sharedDeckButton) {
@@ -3335,27 +3310,12 @@
     }
 
     if (configPanel) {
+      configPanel.hidden = state.isMatchStarted;
       configPanel.classList.toggle("is-locked", state.isMatchStarted);
-      configPanel.classList.toggle("is-collapsed", state.isMatchStarted);
-    }
-
-    if (configSummary && summaryPlayerOne && summaryPlayerTwo && summaryDeckMode) {
-      configSummary.hidden = !state.isMatchStarted;
-      summaryPlayerOne.textContent = getControllerDisplayLabel(state.playerControllers[0]);
-      summaryPlayerTwo.textContent = getControllerDisplayLabel(state.playerControllers[1]);
-      summaryDeckMode.textContent = getDeckModeDisplayLabel(state.deckMode);
-    }
-
-    if (sharedDeckStat) {
-      sharedDeckStat.hidden = renderedState.deckMode === DECK_MODES.SEPARATE;
     }
 
     if (heroElement) {
       heroElement.classList.toggle("is-match-started", state.isMatchStarted);
-    }
-
-    if (topGameBar) {
-      topGameBar.classList.toggle("is-match-started", state.isMatchStarted);
     }
 
     const turnActionsPanel = document.getElementById("player-turn-actions-panel");
