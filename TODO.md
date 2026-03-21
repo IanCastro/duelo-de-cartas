@@ -2,7 +2,7 @@
 
 - [x] Ter a opcao de colocar uma carta em modo de defesa ao inves de atacar; nesse estado, a carta toma metade do dano, fica deitada e pode ser cancelada no mesmo turno.
 - [x] Unificar o log da destruicao de uma carta no campo com o dano que ela tomou.
-- [x] Criar um sistema para validar o log da partida e verificar que nao houve problemas.
+- [x] Criar um sistema para validar o log da partida e verificar que nao houve problemas, inclusive com validacao automatica no fim da partida.
 - [x] Criar uma area de configuracao que permita escolher:
   - o baralho no modo atual; ou
   - um modo em que cada jogador tenha um baralho separado, com duas cartas de cada.

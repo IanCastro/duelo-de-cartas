@@ -325,6 +325,32 @@
     state.logValidationIssues = result.issues;
   }
 
+  function applyLogValidationResult(state, result) {
+    state.logValidationStatus = result.status;
+    state.validatedEntryCount = result.validatedEntryCount;
+    state.logValidationIssues = result.issues;
+    return result;
+  }
+
+  function validateCurrentLog(state, options = {}) {
+    const result = applyLogValidationResult(state, validateMatchLog(state.log));
+
+    if (options.alertOnFailure && result.status === LOG_VALIDATION_STATUS.INVALID) {
+      const problemCount = result.issues.length;
+      const message = problemCount === 1
+        ? "A validacao automatica do log encontrou 1 problema. Abra o menu Log para revisar."
+        : `A validacao automatica do log encontrou ${problemCount} problemas. Abra o menu Log para revisar.`;
+
+      if (typeof options.notifyFn === "function") {
+        options.notifyFn(message);
+      } else if (typeof window !== "undefined" && typeof window.alert === "function") {
+        window.alert(message);
+      }
+    }
+
+    return result;
+  }
+
   function buildInitialLogMessage(state) {
     const playerHands = state.players
       .map((player) => `${player.nome}: ${player.hand.map((card) => card.nome).join(", ")}`)
@@ -1939,7 +1965,7 @@
     };
   }
 
-  function resolveEffectTarget(state, playerIndex, targetType, targetInstanceId) {
+  function resolveEffectTarget(state, playerIndex, targetType, targetInstanceId, options = {}) {
     if (!state.isMatchStarted || state.winner || state.currentPlayerIndex !== playerIndex || !state.selectedEffectCard) {
       return false;
     }
@@ -1982,6 +2008,12 @@
       resolution.message = `${resolution.message} ${winner.nome} venceu a partida.`;
     }
     addLog(state, resolution.message, resolution.event);
+    if (winner) {
+      validateCurrentLog(state, {
+        alertOnFailure: true,
+        notifyFn: options.notifyFn
+      });
+    }
     return true;
   }
 
@@ -2068,7 +2100,7 @@
     return true;
   }
 
-  function attackTarget(state, playerIndex, targetType, targetInstanceId) {
+  function attackTarget(state, playerIndex, targetType, targetInstanceId, options = {}) {
     if (state.selectedEffectCard) {
       return false;
     }
@@ -2105,6 +2137,12 @@
         message = `${message} ${winner.nome} venceu a partida.`;
       }
       addLog(state, message, event);
+      if (winner) {
+        validateCurrentLog(state, {
+          alertOnFailure: true,
+          notifyFn: options.notifyFn
+        });
+      }
       return true;
     }
 
@@ -3457,10 +3495,7 @@
     });
 
     document.getElementById("validate-log-button").addEventListener("click", () => {
-      const validationResult = validateMatchLog(gameState.log);
-      gameState.logValidationStatus = validationResult.status;
-      gameState.validatedEntryCount = validationResult.validatedEntryCount;
-      gameState.logValidationIssues = validationResult.issues;
+      validateCurrentLog(gameState);
       render(gameState);
     });
 
@@ -3638,6 +3673,7 @@
       cancelPendingAction,
       handleShortcutAction,
       getNextAiAction,
+      validateCurrentLog,
       performAiStep,
       getUnitAttack,
       getAvailableAttackers,

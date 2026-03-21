@@ -2266,6 +2266,34 @@ test("log validator passes after a lethal player attack", () => {
   assert(result.validatedEntryCount === state.log.length, "lethal player attack validation should cover every line");
 });
 
+test("lethal player attack auto-validates the log when the match ends", () => {
+  const state = createStartedState();
+  state.players[1].vida = 2;
+  state.players[0].manaAtual = 1;
+  state.players[0].manaMax = 1;
+  Object.assign(state.players[0].hand[0], {
+    id: "atk",
+    nome: "Finalizador",
+    categoria: "unidade",
+    custo: 1,
+    ataque: 4,
+    vida: 3,
+    vidaBase: 3,
+    descricao: ""
+  });
+
+  const attackerInstanceId = state.players[0].hand[0].instanceId;
+  state.log[0].snapshot = snapshotStateForValidation(state);
+
+  game.playCard(state, 0, attackerInstanceId);
+  game.selectAttacker(state, 0, attackerInstanceId);
+  game.attackTarget(state, 0, "player");
+
+  assert(state.logValidationStatus === game.LOG_VALIDATION_STATUS.VALID, "winning the match by attack should auto-validate the log");
+  assert(state.validatedEntryCount === state.log.length, "automatic validation should cover every log line");
+  assert(state.logValidationIssues.length === 0, "automatic validation should not report issues on a healthy lethal attack history");
+});
+
 test("log validator passes after lethal direct damage on the player", () => {
   const state = createStartedState();
   state.players[1].vida = 3;
@@ -2291,6 +2319,67 @@ test("log validator passes after lethal direct damage on the player", () => {
 
   assert(result.status === game.LOG_VALIDATION_STATUS.VALID, "lethal direct-damage histories should validate successfully");
   assert(result.validatedEntryCount === state.log.length, "lethal direct-damage validation should cover every line");
+});
+
+test("lethal direct damage auto-validates the log when the match ends", () => {
+  const state = createStartedState();
+  state.players[1].vida = 3;
+  state.players[0].manaAtual = 1;
+  state.players[0].manaMax = 1;
+  Object.assign(state.players[0].hand[0], {
+    id: "bolt",
+    nome: "Raio Arcano",
+    categoria: "efeito",
+    custo: 1,
+    efeito: "dano_direto",
+    valor: 3,
+    descricao: ""
+  });
+
+  const effectInstanceId = state.players[0].hand[0].instanceId;
+  state.log[0].snapshot = snapshotStateForValidation(state);
+
+  game.playCard(state, 0, effectInstanceId);
+  game.resolveEffectTarget(state, 0, "player");
+
+  assert(state.logValidationStatus === game.LOG_VALIDATION_STATUS.VALID, "winning the match by effect should auto-validate the log");
+  assert(state.validatedEntryCount === state.log.length, "automatic validation should cover every log line after lethal direct damage");
+  assert(state.logValidationIssues.length === 0, "automatic validation should not report issues on a healthy lethal direct-damage history");
+});
+
+test("automatic end-of-match validation alerts when the completed log is invalid", () => {
+  const state = createStartedState();
+  state.players[1].vida = 2;
+  state.players[0].manaAtual = 1;
+  state.players[0].manaMax = 1;
+  Object.assign(state.players[0].hand[0], {
+    id: "atk",
+    nome: "Finalizador",
+    categoria: "unidade",
+    custo: 1,
+    ataque: 4,
+    vida: 3,
+    vidaBase: 3,
+    descricao: ""
+  });
+
+  const attackerInstanceId = state.players[0].hand[0].instanceId;
+  state.log[0].snapshot = snapshotStateForValidation(state);
+  game.playCard(state, 0, attackerInstanceId);
+  const playedEntry = state.log[state.log.length - 1];
+  assert(playedEntry && playedEntry.snapshot, "playing the lethal attacker should add a log line before the tamper step");
+  playedEntry.snapshot.players[0].board = [];
+  game.selectAttacker(state, 0, attackerInstanceId);
+
+  const notifications = [];
+  game.attackTarget(state, 0, "player", undefined, {
+    notifyFn: (message) => notifications.push(message)
+  });
+
+  assert(state.logValidationStatus === game.LOG_VALIDATION_STATUS.INVALID, "automatic validation should flag the completed log when it is broken");
+  assert(state.logValidationIssues.length > 0, "automatic validation should surface at least one issue for a broken completed log");
+  assert(notifications.length === 1, "automatic validation should alert once when it finds a broken completed log");
+  assert(notifications[0].includes("validacao automatica do log"), "alert message should explain that the automatic log validation failed");
 });
 
 test("log display helper shows the newest entry first without renumbering", () => {
