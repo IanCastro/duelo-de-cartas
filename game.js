@@ -380,26 +380,56 @@
     };
   }
 
+  function notifyHistoryPersistenceFailure(status, options = {}) {
+    const statusLabel = status === "finished" ? "encerrada" : "abandonada";
+    const message = `A partida ${statusLabel} foi mantida apenas nesta sessao. Nao foi possivel persistir o Historico no navegador.`;
+
+    if (typeof options.notifyFn === "function") {
+      options.notifyFn(message);
+      return;
+    }
+
+    if (typeof window !== "undefined" && typeof window.alert === "function") {
+      window.alert(message);
+    }
+  }
+
   function archiveCurrentMatchIfNeeded(state, status, options = {}) {
+    const result = {
+      archived: false,
+      persisted: false,
+      recordId: null
+    };
+
     if (!state?.isMatchStarted || state.hasCurrentMatchBeenSavedToHistory) {
-      return false;
+      return result;
     }
 
     if (!state.log.length) {
-      return false;
+      return result;
     }
 
     if (status === "finished" && !state.winner) {
-      return false;
+      return result;
     }
 
     const savedRecord = createSavedMatchRecord(state, status);
-    state.matchHistory = [savedRecord, ...(state.matchHistory || [])]
+    state.matchHistory = [
+      savedRecord,
+      ...((state.matchHistory || []).filter((record) => record.id !== savedRecord.id))
+    ]
       .map((record) => cloneSavedMatchRecord(record))
       .slice(0, MAX_SAVED_MATCHES);
-    state.hasCurrentMatchBeenSavedToHistory = true;
-    saveMatchHistory(state.matchHistory, options);
-    return true;
+    result.archived = true;
+    result.recordId = savedRecord.id;
+    result.persisted = saveMatchHistory(state.matchHistory, options);
+    state.hasCurrentMatchBeenSavedToHistory = result.persisted;
+
+    if (!result.persisted) {
+      notifyHistoryPersistenceFailure(status, options);
+    }
+
+    return result;
   }
 
   function getSelectedHistoryMatch(state) {
@@ -416,9 +446,9 @@
     }
 
     if (selectedEntryId != null) {
-      const selectedEntry = record.log.find((entry) => entry.id === selectedEntryId);
-      if (selectedEntry?.snapshot && !selectedEntry.snapshot.winnerPlayerId) {
-        const selectedIndex = record.log.findIndex((entry) => entry.id === selectedEntryId);
+      const selectedIndex = record.log.findIndex((entry) => entry.id === selectedEntryId);
+      const selectedEntry = selectedIndex === -1 ? null : record.log[selectedIndex];
+      if (selectedEntry?.snapshot) {
         return {
           snapshot: selectedEntry.snapshot,
           log: cloneLogEntries(record.log.slice(0, selectedIndex + 1))
@@ -428,7 +458,7 @@
 
     for (let index = record.log.length - 1; index >= 0; index -= 1) {
       const entry = record.log[index];
-      if (entry?.snapshot && !entry.snapshot.winnerPlayerId) {
+      if (entry?.snapshot) {
         return {
           snapshot: entry.snapshot,
           log: cloneLogEntries(record.log.slice(0, index + 1))
@@ -446,7 +476,11 @@
     return null;
   }
 
-  function restoreMatchFromHistory(record, previousState) {
+  function restoreMatchFromHistory(record, previousState, options = {}) {
+    if (previousState?.isMatchStarted) {
+      archiveCurrentMatchIfNeeded(previousState, previousState.winner ? "finished" : "abandoned", options);
+    }
+
     const restoreTarget = getHistoryRestoreTarget(record, previousState?.selectedHistoryLogEntryId ?? null);
     if (!restoreTarget) {
       return previousState || createInitialState();
@@ -3970,10 +4004,14 @@
   }
 
   function getDefaultHistoryLogEntryId(record) {
-    const restoreTarget = getHistoryRestoreTarget(record);
-    const targetLog = restoreTarget?.log || [];
-    const targetEntry = targetLog[targetLog.length - 1] || null;
-    return targetEntry?.id ?? null;
+    for (let index = record?.log?.length - 1; index >= 0; index -= 1) {
+      const entry = record.log[index];
+      if (entry?.snapshot) {
+        return entry.id;
+      }
+    }
+
+    return null;
   }
 
   function getLogValidationStatusLabel(state) {
@@ -4882,14 +4920,18 @@
     document.getElementById("restart-button").addEventListener("click", () => {
       cancelHeadlessSimulation();
       cancelAiTurn(gameState);
-      gameState = createRestartState(gameState);
+      gameState = createRestartState(gameState, {
+        notifyFn: typeof window !== "undefined" ? window.alert.bind(window) : null
+      });
       render(gameState);
     });
 
     document.getElementById("winner-restart-button").addEventListener("click", () => {
       cancelHeadlessSimulation();
       cancelAiTurn(gameState);
-      gameState = createRestartState(gameState);
+      gameState = createRestartState(gameState, {
+        notifyFn: typeof window !== "undefined" ? window.alert.bind(window) : null
+      });
       render(gameState);
     });
 
@@ -4906,7 +4948,9 @@
 
       cancelHeadlessSimulation();
       cancelAiTurn(gameState);
-      gameState = restoreMatchFromHistory(selectedRecord, gameState);
+      gameState = restoreMatchFromHistory(selectedRecord, gameState, {
+        notifyFn: typeof window !== "undefined" ? window.alert.bind(window) : null
+      });
       render(gameState);
     });
 

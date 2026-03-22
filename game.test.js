@@ -99,6 +99,17 @@ function createMemoryStorage() {
   };
 }
 
+function createFailingStorage() {
+  return {
+    getItem() {
+      return null;
+    },
+    setItem() {
+      throw new Error("storage unavailable");
+    }
+  };
+}
+
 test("initial state opens in pre-game with default player controllers", () => {
   const state = game.createInitialState();
 
@@ -323,6 +334,85 @@ test("history records can be restored as a live current match", () => {
   assert(restoredState.hasCurrentMatchBeenSavedToHistory === false, "restored matches should be treated as a fresh live branch");
   assert(restoredState.currentMatchId !== record.id, "restored matches should receive a new live match id");
   assert(restoredState.selectedHistoryMatchId === null && restoredState.selectedHistoryLogEntryId === null, "restoring should clear history selections");
+});
+
+test("restoring a history record archives the current live match before switching", () => {
+  const storage = createMemoryStorage();
+  const archivedSource = createStartedState();
+  game.drawTurnCard(archivedSource, 0);
+  game.archiveCurrentMatchIfNeeded(archivedSource, "abandoned", { storage });
+  const historicalRecord = archivedSource.matchHistory[0];
+
+  const currentLiveState = createStartedState();
+  currentLiveState.matchHistory = game.loadMatchHistory({ storage });
+  const selectedRecord = game.selectHistoryMatch(currentLiveState, historicalRecord.id);
+
+  const restoredState = game.restoreMatchFromHistory(selectedRecord, currentLiveState, { storage });
+
+  assert(currentLiveState.hasCurrentMatchBeenSavedToHistory === true, "restoring should archive the current live match first");
+  assert(restoredState.matchHistory.length === 2, "restoring should keep both the original history record and the archived current match");
+  assert(restoredState.matchHistory.some((record) => record.id === currentLiveState.currentMatchId && record.status === "abandoned"), "the interrupted live match should be added to history as abandoned");
+});
+
+test("finished history records default to the final log entry and restore the full final snapshot", () => {
+  const storage = createMemoryStorage();
+  const winningState = createStartedState();
+  winningState.players[1].vida = 2;
+  winningState.players[0].manaAtual = 1;
+  winningState.players[0].manaMax = 1;
+  Object.assign(winningState.players[0].hand[0], {
+    id: "atk",
+    nome: "Finalizador",
+    categoria: "unidade",
+    efeito: null,
+    custo: 1,
+    ataque: 4,
+    vida: 3,
+    vidaBase: 3,
+    descricao: ""
+  });
+
+  const attackerInstanceId = winningState.players[0].hand[0].instanceId;
+  winningState.log[0].snapshot = snapshotStateForValidation(winningState);
+  game.playCard(winningState, 0, attackerInstanceId);
+  game.selectAttacker(winningState, 0, attackerInstanceId);
+  game.attackTarget(winningState, 0, "player", undefined, { storage });
+
+  const pregameState = game.createInitialState();
+  pregameState.matchHistory = game.loadMatchHistory({ storage });
+  const finishedRecord = pregameState.matchHistory[0];
+  const selectedRecord = game.selectHistoryMatch(pregameState, finishedRecord.id);
+  const lastLogEntry = finishedRecord.log[finishedRecord.log.length - 1];
+  const restoredState = game.restoreMatchFromHistory(selectedRecord, pregameState);
+
+  assert(pregameState.selectedHistoryLogEntryId === lastLogEntry.id, "finished history should default to the latest log line");
+  assert(restoredState.log.length === finishedRecord.log.length, "restoring the final line should keep the full match log");
+  assert(restoredState.winner && restoredState.winner.id === finishedRecord.winnerPlayerId, "restoring the final line should keep the winner");
+  assert(restoredState.isWinnerModalOpen === true, "restoring the final line should reopen the winner modal state");
+});
+
+test("failing to persist the history keeps the record in memory, allows retry, and does not mark it as saved", () => {
+  const storage = createFailingStorage();
+  const notifications = [];
+  const state = createStartedState();
+
+  const firstResult = game.archiveCurrentMatchIfNeeded(state, "abandoned", {
+    storage,
+    notifyFn: (message) => notifications.push(message)
+  });
+  const secondResult = game.archiveCurrentMatchIfNeeded(state, "abandoned", {
+    storage,
+    notifyFn: (message) => notifications.push(message)
+  });
+
+  assert(firstResult.archived === true, "the match should still be archived in memory when persistence fails");
+  assert(firstResult.persisted === false, "the archive result should report the failed persistence");
+  assert(firstResult.recordId === state.currentMatchId, "the archive result should identify the live match record");
+  assert(state.hasCurrentMatchBeenSavedToHistory === false, "a failed persistence should not mark the live match as already saved");
+  assert(state.matchHistory.length === 1, "failed persistence should not duplicate the in-memory record on retry");
+  assert(state.matchHistory[0].id === state.currentMatchId, "the in-memory history should keep the live match record available");
+  assert(secondResult.archived === true && secondResult.persisted === false, "retrying after a failed persistence should try to archive again");
+  assert(notifications.length === 2, "each failed persistence attempt should notify the user");
 });
 
 test("pre-game blocks shortcuts and gameplay actions until Start", () => {
@@ -3190,6 +3280,7 @@ test("lethal direct damage auto-validates the log when the match ends", () => {
 
 test("automatic end-of-match validation alerts when the completed log is invalid", () => {
   const state = createStartedState();
+  const storage = createMemoryStorage();
   state.players[1].vida = 2;
   state.players[0].manaAtual = 1;
   state.players[0].manaMax = 1;
@@ -3215,6 +3306,7 @@ test("automatic end-of-match validation alerts when the completed log is invalid
 
   const notifications = [];
   game.attackTarget(state, 0, "player", undefined, {
+    storage,
     notifyFn: (message) => notifications.push(message)
   });
 
