@@ -6,8 +6,13 @@
   const CARD_COPIES_PER_TYPE = 4;
   const SEPARATE_DECK_COPIES_PER_TYPE = 2;
   const AI_STEP_DELAY_MS = 500;
+  const HEADLESS_AI_BATCH_SIZE = 40;
   const MATCH_HISTORY_STORAGE_KEY = "duelo-de-cartas-match-history-v1";
   const MAX_SAVED_MATCHES = 20;
+  const MATCH_PRESENTATION_MODES = Object.freeze({
+    VISUAL: "visual",
+    HEADLESS_AI_VS_AI: "headless-ai-vs-ai"
+  });
   const DECK_MODES = Object.freeze({
     SHARED: "shared",
     SEPARATE: "separate"
@@ -42,6 +47,7 @@
   let sessionPlayerControllers = [PLAYER_CONTROLLER_TYPES.HUMAN, PLAYER_CONTROLLER_TYPES.AI];
   let sessionDeckMode = DECK_MODES.SEPARATE;
   let aiTurnTimerId = null;
+  let headlessSimulationTimerId = null;
   let nextMatchId = 1;
 
   const CARD_LIBRARY = [
@@ -473,6 +479,8 @@
       playerControllers: getSessionPlayerControllers(),
       deckMode: getSessionDeckMode(),
       isMatchStarted: false,
+      matchPresentationMode: MATCH_PRESENTATION_MODES.VISUAL,
+      isHeadlessSimulationRunning: false,
       isAiVsAiPaused: false,
       isAiTurnInProgress: false,
       aiStepText: null,
@@ -519,6 +527,8 @@
     nextState.matchHistory = (previousState?.matchHistory || []).map((record) => cloneSavedMatchRecord(record));
     nextState.currentMatchId = createUniqueMatchId();
     nextState.isMatchStarted = true;
+    nextState.matchPresentationMode = MATCH_PRESENTATION_MODES.VISUAL;
+    nextState.isHeadlessSimulationRunning = false;
 
     if (nextState.deckMode === DECK_MODES.SHARED) {
       nextState.deck = shuffleDeck(createDeck());
@@ -631,6 +641,9 @@
       notifyFn: options.notifyFn
     });
     archiveCurrentMatchIfNeeded(state, "finished", options);
+    if (isHeadlessAiVsAiMode(state)) {
+      finishHeadlessAiMatch(state);
+    }
     return result;
   }
 
@@ -779,6 +792,8 @@
       playerControllers: normalizePlayerControllers(snapshot.playerControllers),
       deckMode: normalizeDeckMode(snapshot.deckMode),
       isMatchStarted: Boolean(snapshot.isMatchStarted),
+      matchPresentationMode: MATCH_PRESENTATION_MODES.VISUAL,
+      isHeadlessSimulationRunning: false,
       isAiVsAiPaused: false,
       isAiTurnInProgress: false,
       aiStepText: null,
@@ -1866,8 +1881,28 @@
     );
   }
 
+  function isHeadlessAiVsAiMode(state) {
+    return Boolean(
+      state
+      && state.matchPresentationMode === MATCH_PRESENTATION_MODES.HEADLESS_AI_VS_AI
+      && isAiVsAiMatch(state)
+    );
+  }
+
+  function canAiTakeStep(state, options = {}) {
+    const ignorePause = options.ignorePause === true;
+    return Boolean(
+      state
+      && state.isMatchStarted
+      && !state.winner
+      && isAiControlledPlayer(state, state.currentPlayerIndex)
+      && !isViewingHistory(state)
+      && (ignorePause || !state.isAiVsAiPaused)
+    );
+  }
+
   function toggleAiVsAiPause(state) {
-    if (!isAiVsAiMatch(state) || state.winner) {
+    if (!isAiVsAiMatch(state) || state.winner || isHeadlessAiVsAiMode(state)) {
       return false;
     }
 
@@ -1886,7 +1921,15 @@
   }
 
   function shouldRunAi(state) {
-    return isAiTurnActive(state) && !isViewingHistory(state) && !state.isAiVsAiPaused;
+    return canAiTakeStep(state) && !isHeadlessAiVsAiMode(state);
+  }
+
+  function shouldRunHeadlessSimulation(state) {
+    return Boolean(
+      isHeadlessAiVsAiMode(state)
+      && state.isHeadlessSimulationRunning
+      && canAiTakeStep(state, { ignorePause: true })
+    );
   }
 
   function cancelAiTurn(state = null) {
@@ -1903,6 +1946,56 @@
     if (!isAiTurnActive(state)) {
       state.aiStepText = null;
     }
+  }
+
+  function cancelHeadlessSimulation() {
+    if (headlessSimulationTimerId !== null) {
+      clearTimeout(headlessSimulationTimerId);
+      headlessSimulationTimerId = null;
+    }
+  }
+
+  function startHeadlessAiMatch(previousState) {
+    if (!isAiControlledPlayer(previousState, 0) || !isAiControlledPlayer(previousState, 1)) {
+      return startConfiguredMatch(previousState);
+    }
+
+    const nextState = startConfiguredMatch(previousState);
+    nextState.matchPresentationMode = MATCH_PRESENTATION_MODES.HEADLESS_AI_VS_AI;
+    nextState.isHeadlessSimulationRunning = true;
+    nextState.isAiVsAiPaused = false;
+    nextState.isAiTurnInProgress = true;
+    nextState.aiStepText = "Simulando IA x IA...";
+    nextState.isLibraryOpen = false;
+    nextState.isRulesOpen = false;
+    nextState.isLogOpen = false;
+    nextState.isHistoryOpen = false;
+    nextState.selectedLogEntryId = null;
+    nextState.selectedHistoryMatchId = null;
+    nextState.selectedHistoryLogEntryId = null;
+    nextState.isWinnerModalOpen = false;
+    return nextState;
+  }
+
+  function finishHeadlessAiMatch(state) {
+    if (!isHeadlessAiVsAiMode(state)) {
+      return false;
+    }
+
+    cancelHeadlessSimulation();
+    state.isHeadlessSimulationRunning = false;
+    state.isAiTurnInProgress = false;
+    state.isAiVsAiPaused = false;
+    state.isWinnerModalOpen = false;
+    state.isLibraryOpen = false;
+    state.isRulesOpen = false;
+    state.isLogOpen = false;
+    state.isHistoryOpen = false;
+    state.selectedLogEntryId = null;
+    state.aiStepText = state.winner
+      ? `${state.winner.nome} venceu apos ${state.log.length} acao(oes).`
+      : "Simulacao IA x IA encerrada.";
+    return true;
   }
 
   function getAiPlayableCards(state) {
@@ -1976,8 +2069,8 @@
       || compareText(left.nome, right.nome);
   }
 
-  function getNextAiAction(state) {
-    if (!shouldRunAi(state)) {
+  function getNextAiAction(state, options = {}) {
+    if (!canAiTakeStep(state, { ignorePause: options.ignorePause === true })) {
       return null;
     }
 
@@ -2194,8 +2287,8 @@
     };
   }
 
-  function performAiStep(state) {
-    const action = getNextAiAction(state);
+  function performAiStep(state, options = {}) {
+    const action = getNextAiAction(state, options);
 
     if (!action) {
       return null;
@@ -2298,6 +2391,58 @@
       performAiStep(gameState);
       render(gameState);
     }, AI_STEP_DELAY_MS);
+
+    return true;
+  }
+
+  function performHeadlessSimulationBatch(state, batchSize = HEADLESS_AI_BATCH_SIZE) {
+    if (!shouldRunHeadlessSimulation(state)) {
+      return 0;
+    }
+
+    let actionsPerformed = 0;
+
+    while (actionsPerformed < batchSize && shouldRunHeadlessSimulation(state)) {
+      const action = performAiStep(state, { ignorePause: true });
+
+      if (!action) {
+        break;
+      }
+
+      actionsPerformed += 1;
+    }
+
+    if (state.winner) {
+      finishHeadlessAiMatch(state);
+    }
+
+    return actionsPerformed;
+  }
+
+  function scheduleHeadlessSimulationTick(state) {
+    if (!shouldRunHeadlessSimulation(state)) {
+      cancelHeadlessSimulation();
+      return false;
+    }
+
+    if (headlessSimulationTimerId !== null) {
+      return true;
+    }
+
+    headlessSimulationTimerId = setTimeout(() => {
+      headlessSimulationTimerId = null;
+
+      if (!shouldRunHeadlessSimulation(gameState)) {
+        if (gameState.winner) {
+          finishHeadlessAiMatch(gameState);
+        }
+        render(gameState);
+        return;
+      }
+
+      performHeadlessSimulationBatch(gameState);
+      render(gameState);
+    }, 0);
 
     return true;
   }
@@ -3178,6 +3323,10 @@
     }
 
     if (isViewingHistory(state)) {
+      return false;
+    }
+
+    if (isHeadlessAiVsAiMode(state)) {
       return false;
     }
 
@@ -4162,6 +4311,85 @@
     return renderedState;
   }
 
+  function getHeadlessAiStatusText(state) {
+    if (!isHeadlessAiVsAiMode(state)) {
+      return "";
+    }
+
+    if (state.isHeadlessSimulationRunning) {
+      return "Simulando";
+    }
+
+    return state.winner ? "Concluida" : "Encerrada";
+  }
+
+  function getHeadlessAiSummaryText(state) {
+    const validationLabel = getLogValidationStatusLabel(state);
+
+    if (state.isHeadlessSimulationRunning) {
+      return `Simulando IA x IA... ${state.log.length} acao(oes) registradas ate agora.`;
+    }
+
+    if (state.winner) {
+      return `${state.winner.nome} venceu apos ${state.log.length} acao(oes). ${validationLabel}.`;
+    }
+
+    return `Simulacao encerrada apos ${state.log.length} acao(oes). ${validationLabel}.`;
+  }
+
+  function renderHeadlessAiPanel(state) {
+    const panel = document.getElementById("headless-ai-panel");
+    const title = document.getElementById("headless-ai-title");
+    const status = document.getElementById("headless-ai-status");
+    const copy = document.getElementById("headless-ai-copy");
+    const finalSection = document.getElementById("headless-ai-final");
+    const summary = document.getElementById("headless-ai-summary");
+    const logElement = document.getElementById("headless-ai-log");
+
+    if (!panel || !title || !status || !copy || !finalSection || !summary || !logElement) {
+      return;
+    }
+
+    const isHeadlessMode = isHeadlessAiVsAiMode(state);
+    panel.hidden = !isHeadlessMode;
+
+    if (!isHeadlessMode) {
+      return;
+    }
+
+    const running = state.isHeadlessSimulationRunning;
+    title.textContent = running ? "Simulacao IA x IA" : "Log final da simulacao";
+    status.textContent = getHeadlessAiStatusText(state);
+    copy.textContent = running
+      ? "Simulando IA x IA sem tabuleiro. O log completo aparecera ao terminar."
+      : "A simulacao terminou. Confira abaixo o log final desta partida.";
+    finalSection.hidden = running;
+    summary.textContent = getHeadlessAiSummaryText(state);
+    logElement.innerHTML = "";
+
+    if (running) {
+      return;
+    }
+
+    if (!state.log.length) {
+      const empty = document.createElement("div");
+      empty.className = "empty-state";
+      empty.textContent = "Nenhuma acao foi registrada nesta simulacao.";
+      logElement.appendChild(empty);
+      return;
+    }
+
+    getDisplayLogEntries(state.log).forEach((entry) => {
+      const item = document.createElement("div");
+      item.className = "log-entry";
+      item.innerHTML = `
+        <span class="log-entry-number">${entry.numero}</span>
+        <span class="log-entry-text">${entry.texto}</span>
+      `;
+      logElement.appendChild(item);
+    });
+  }
+
   function render(state) {
     const viewingHistory = isViewingHistory(state);
     const aiTurnActive = isAiTurnActive(state);
@@ -4288,15 +4516,19 @@
     const toggleLogButton = document.getElementById("toggle-log-button");
     const toggleHistoryButton = document.getElementById("toggle-history-button");
     const startButton = document.getElementById("start-button");
+    const simulateAiMatchButton = document.getElementById("simulate-ai-match-button");
     const restartButton = document.getElementById("restart-button");
     const aiMatchStrip = document.getElementById("ai-match-strip");
     const aiMatchText = document.getElementById("ai-match-text");
     const toggleAiMatchButton = document.getElementById("toggle-ai-match-button");
+    const headlessAiPanel = document.getElementById("headless-ai-panel");
     const sharedDeckButton = document.getElementById("deck-mode-shared");
     const separateDeckButton = document.getElementById("deck-mode-separate");
     const configPanel = document.getElementById("match-config-panel");
     const anySidePanelOpen = isAnySidePanelOpen(state);
     const heroElement = document.querySelector(".hero");
+    const headlessMode = isHeadlessAiVsAiMode(state);
+    const headlessSimulationReady = !state.isMatchStarted && isAiControlledPlayer(state, 0) && isAiControlledPlayer(state, 1);
 
     if (boardElement && sideRail && libraryPanel && rulesPanel && logPanel && historyPanel && toggleLibraryButton && toggleRulesButton && toggleLogButton && toggleHistoryButton) {
       boardElement.classList.toggle("board-with-side-rail", anySidePanelOpen);
@@ -4342,13 +4574,18 @@
       startButton.disabled = state.isMatchStarted;
     }
 
+    if (simulateAiMatchButton) {
+      simulateAiMatchButton.hidden = !headlessSimulationReady;
+      simulateAiMatchButton.disabled = !headlessSimulationReady;
+    }
+
     if (restartButton) {
       restartButton.hidden = !state.isMatchStarted;
       restartButton.disabled = !state.isMatchStarted;
     }
 
     if (aiMatchStrip && toggleAiMatchButton && aiMatchText) {
-      const showAiMatchStrip = state.isMatchStarted && isAiVsAiMatch(state);
+      const showAiMatchStrip = state.isMatchStarted && isAiVsAiMatch(state) && !headlessMode;
       aiMatchStrip.hidden = !showAiMatchStrip;
       toggleAiMatchButton.textContent = state.isAiVsAiPaused ? "Continuar IA x IA" : "Pausar IA x IA";
       toggleAiMatchButton.setAttribute("aria-pressed", String(state.isAiVsAiPaused));
@@ -4384,6 +4621,22 @@
 
     if (heroElement) {
       heroElement.classList.toggle("is-match-started", state.isMatchStarted);
+    }
+
+    if (toggleLibraryButton && toggleRulesButton && toggleLogButton && toggleHistoryButton) {
+      toggleLibraryButton.hidden = headlessMode;
+      toggleRulesButton.hidden = headlessMode;
+      toggleLogButton.hidden = headlessMode;
+      toggleHistoryButton.hidden = headlessMode;
+    }
+
+    if (headlessAiPanel) {
+      headlessAiPanel.hidden = !headlessMode;
+    }
+
+    if (boardElement) {
+      boardElement.hidden = headlessMode;
+      boardElement.setAttribute("aria-hidden", String(headlessMode));
     }
 
     const turnActionsPanel = document.getElementById("player-turn-actions-panel");
@@ -4480,6 +4733,7 @@
     renderLogValidation(state);
     renderLibrary(renderedState);
     renderMatchHistory(state);
+    renderHeadlessAiPanel(state);
 
     document.getElementById("player-bottom-panel").classList.toggle("active", matchStarted && renderedState.currentPlayerIndex === 0 && !renderedState.winner);
     document.getElementById("player-top-panel").classList.toggle("active", matchStarted && renderedState.currentPlayerIndex === 1 && !renderedState.winner);
@@ -4489,11 +4743,17 @@
     const winnerModalText = document.getElementById("winner-modal-text");
 
     if (winnerModal && winnerModalTitle && winnerModalText) {
-      winnerModal.setAttribute("aria-hidden", String(viewingHistory || !state.isWinnerModalOpen));
+      winnerModal.setAttribute("aria-hidden", String(headlessMode || viewingHistory || !state.isWinnerModalOpen));
       if (state.winner) {
         winnerModalTitle.textContent = `${state.winner.nome} venceu`;
         winnerModalText.textContent = `${state.winner.nome} reduziu a vida rival a zero e venceu a partida.`;
       }
+    }
+
+    if (shouldRunHeadlessSimulation(state)) {
+      scheduleHeadlessSimulationTick(state);
+    } else {
+      cancelHeadlessSimulation();
     }
 
     if (shouldRunAi(state)) {
@@ -4581,8 +4841,20 @@
         return;
       }
 
+      cancelHeadlessSimulation();
       cancelAiTurn(gameState);
       gameState = startConfiguredMatch(gameState);
+      render(gameState);
+    });
+
+    document.getElementById("simulate-ai-match-button").addEventListener("click", () => {
+      if (gameState.isMatchStarted || !isAiControlledPlayer(gameState, 0) || !isAiControlledPlayer(gameState, 1)) {
+        return;
+      }
+
+      cancelHeadlessSimulation();
+      cancelAiTurn(gameState);
+      gameState = startHeadlessAiMatch(gameState);
       render(gameState);
     });
 
@@ -4608,12 +4880,14 @@
     });
 
     document.getElementById("restart-button").addEventListener("click", () => {
+      cancelHeadlessSimulation();
       cancelAiTurn(gameState);
       gameState = createRestartState(gameState);
       render(gameState);
     });
 
     document.getElementById("winner-restart-button").addEventListener("click", () => {
+      cancelHeadlessSimulation();
       cancelAiTurn(gameState);
       gameState = createRestartState(gameState);
       render(gameState);
@@ -4630,6 +4904,7 @@
         return;
       }
 
+      cancelHeadlessSimulation();
       cancelAiTurn(gameState);
       gameState = restoreMatchFromHistory(selectedRecord, gameState);
       render(gameState);
@@ -4675,8 +4950,10 @@
       CARD_COPIES_PER_TYPE,
       SEPARATE_DECK_COPIES_PER_TYPE,
       AI_STEP_DELAY_MS,
+      HEADLESS_AI_BATCH_SIZE,
       MATCH_HISTORY_STORAGE_KEY,
       MAX_SAVED_MATCHES,
+      MATCH_PRESENTATION_MODES,
       DECK_MODES,
       PLAYER_CONTROLLER_TYPES,
       LOG_VALIDATION_STATUS,
@@ -4723,6 +5000,7 @@
       isAiEnabled,
       isAiControlledPlayer,
       isAiVsAiMatch,
+      isHeadlessAiVsAiMode,
       toggleAiVsAiPause,
       isAiTurnActive,
       createStateSnapshot,
@@ -4749,7 +5027,9 @@
       selectLogValidationIssue,
       copyTextToClipboard,
       copyFocusedLogValidationIssue,
+      startHeadlessAiMatch,
       performAiStep,
+      performHeadlessSimulationBatch,
       getUnitAttack,
       getAvailableAttackers,
       getDrawPile,

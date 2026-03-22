@@ -173,6 +173,8 @@ select {
 .match-config-actions {
   display: flex;
   align-items: stretch;
+  gap: 10px;
+  flex-wrap: wrap;
 }
 
 .match-config-actions .action-button {
@@ -222,6 +224,7 @@ select {
 }
 
 .ai-match-strip,
+.headless-ai-panel,
 .player-panel,
 .side-panel {
   border: 1px solid var(--line);
@@ -232,6 +235,10 @@ select {
 }
 
 .ai-match-strip[hidden] {
+  display: none !important;
+}
+
+.headless-ai-panel[hidden] {
   display: none !important;
 }
 
@@ -258,6 +265,40 @@ select {
   min-width: 280px;
   color: var(--muted);
   line-height: 1.4;
+}
+
+.headless-ai-panel {
+  margin-bottom: 12px;
+  padding: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.headless-ai-copy,
+.headless-ai-summary {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.headless-ai-final {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.headless-ai-log {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 60vh;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.headless-ai-log .log-entry {
+  cursor: default;
 }
 
 .board {
