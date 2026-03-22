@@ -27,6 +27,9 @@
         <button id="toggle-log-button" class="library-toggle" type="button" aria-expanded="false" aria-controls="log-panel">
           Log
         </button>
+        <button id="toggle-history-button" class="library-toggle" type="button" aria-expanded="false" aria-controls="history-panel">
+          Historico
+        </button>
         <button id="restart-button" class="library-toggle" type="button">
           Nova partida
         </button>
@@ -254,6 +257,7 @@
           <p>Cada unidade pode atacar no turno em que entra em campo e depois 1 vez por turno. Se o rival nao tiver unidades em campo, voce pode destruir um suporte com 1 ataque. Reparo Rapido so pode curar alvos feridos.</p>
           <p>No Log, clique em uma linha para ver aquele momento antigo no tabuleiro em modo somente leitura. Clique novamente na mesma linha para voltar para aquele momento com confirmacao, ou clique na linha mais recente ou pressione Esc para voltar ao presente.</p>
           <p>Use o botao Validar log no proprio menu de Log para rodar um replay completo e verificar se o historico da partida ficou consistente.</p>
+          <p>Use Historico para revisar partidas encerradas ou abandonadas salvas no navegador e restaurar uma delas como partida atual quando quiser continuar daquele ponto.</p>
         </section>
 
         <section class="side-panel log-panel" id="log-panel" aria-hidden="true">
@@ -271,6 +275,25 @@
           <div id="log-validation-copy-feedback" class="log-validation-copy-feedback" hidden aria-live="polite"></div>
           <div id="game-log"></div>
           <div id="log-validation-results" class="log-validation-results" hidden aria-live="polite"></div>
+        </section>
+
+        <section class="side-panel history-panel" id="history-panel" aria-hidden="true">
+          <div class="hand-meta">
+            <span>Historico</span>
+            <span id="history-match-count">0 partidas</span>
+          </div>
+          <div id="match-history-list" class="match-history-list"></div>
+          <div id="history-match-details" class="history-match-details" hidden>
+            <div class="history-match-summary">
+              <div>
+                <p class="turn-label">Partida selecionada</p>
+                <h3 id="history-match-title">Partida</h3>
+              </div>
+              <button id="restore-history-match-button" class="action-button secondary" type="button">Restaurar como partida atual</button>
+            </div>
+            <p id="history-match-meta" class="history-match-meta"></p>
+            <div id="history-log" class="history-log"></div>
+          </div>
         </section>
       </aside>
     </section>

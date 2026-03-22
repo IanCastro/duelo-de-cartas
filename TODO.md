@@ -9,7 +9,7 @@
 - [x] Compactar o topo e o pre-jogo, escondendo a configuracao da partida depois do Start.
 - [x] Remover o segundo menu superior.
 - [x] Remover os labels `Jogador 1` e `Jogador 2`.
-- [ ] Criar um historico das partidas, separado do log da partida atual, para consultar resultados e revisar partidas anteriores.
+- [x] Criar um historico das partidas, separado do log da partida atual, para consultar resultados e revisar partidas anteriores.
 - [ ] Adicionar um modo em que as duas IAs joguem sem visualizacao da partida, mostrando apenas o log final.
 - [ ] Adicionar mais configuracoes para a IA, tanto no estilo de jogo quanto na visualizacao dos movimentos para o jogador.
 - [x] Nome Guardiao Rubro e Sentinela Azul em uma linha separada das outras acoes (Vida, Mana, Baralho...).

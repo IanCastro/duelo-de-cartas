@@ -591,6 +591,12 @@ select {
   gap: 12px;
 }
 
+.history-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
 #game-log {
   display: flex;
   flex-direction: column;
@@ -601,6 +607,81 @@ select {
   max-height: clamp(420px, 60vh, 620px);
   overflow-y: auto;
   padding-right: 4px;
+}
+
+.match-history-list,
+.history-log {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  color: var(--muted);
+  max-height: 260px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.match-history-entry {
+  width: 100%;
+  padding: 12px;
+  border-radius: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 150ms ease, transform 150ms ease, background 150ms ease;
+}
+
+.match-history-entry:hover {
+  transform: translateY(-1px);
+  border-color: rgba(244, 184, 96, 0.3);
+}
+
+.match-history-entry.is-selected {
+  border-color: rgba(244, 184, 96, 0.54);
+  background: rgba(244, 184, 96, 0.12);
+}
+
+.match-history-entry-title {
+  display: block;
+  color: var(--text);
+  font-weight: 700;
+}
+
+.match-history-entry-meta {
+  display: block;
+  margin-top: 6px;
+  color: var(--muted);
+  line-height: 1.45;
+}
+
+.history-match-details {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+  border-radius: 18px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.history-match-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.history-match-summary h3 {
+  margin: 6px 0 0;
+  font-size: 1.05rem;
+}
+
+.history-match-meta {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.45;
 }
 
 .log-validation-toolbar {

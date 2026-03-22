@@ -6,6 +6,8 @@
   const CARD_COPIES_PER_TYPE = 4;
   const SEPARATE_DECK_COPIES_PER_TYPE = 2;
   const AI_STEP_DELAY_MS = 500;
+  const MATCH_HISTORY_STORAGE_KEY = "duelo-de-cartas-match-history-v1";
+  const MAX_SAVED_MATCHES = 20;
   const DECK_MODES = Object.freeze({
     SHARED: "shared",
     SEPARATE: "separate"
@@ -40,6 +42,7 @@
   let sessionPlayerControllers = [PLAYER_CONTROLLER_TYPES.HUMAN, PLAYER_CONTROLLER_TYPES.AI];
   let sessionDeckMode = DECK_MODES.SEPARATE;
   let aiTurnTimerId = null;
+  let nextMatchId = 1;
 
   const CARD_LIBRARY = [
     {
@@ -234,6 +237,232 @@
     };
   }
 
+  function createUniqueMatchId() {
+    const randomPart = Math.random().toString(36).slice(2, 8);
+    const id = `match-${Date.now()}-${nextMatchId}-${randomPart}`;
+    nextMatchId += 1;
+    return id;
+  }
+
+  function cloneSavedMatchRecord(record) {
+    return {
+      id: record.id,
+      savedAt: record.savedAt,
+      status: record.status,
+      winnerPlayerId: record.winnerPlayerId ?? null,
+      summary: record.summary,
+      snapshot: cloneData(record.snapshot),
+      log: cloneLogEntries(record.log || []),
+      nextLogNumber: record.nextLogNumber,
+      playerControllers: normalizePlayerControllers(record.playerControllers),
+      deckMode: normalizeDeckMode(record.deckMode)
+    };
+  }
+
+  function normalizeSavedMatchRecord(record) {
+    if (!record || typeof record !== "object" || !record.snapshot || !Array.isArray(record.log)) {
+      return null;
+    }
+
+    return {
+      id: typeof record.id === "string" && record.id.length ? record.id : createUniqueMatchId(),
+      savedAt: typeof record.savedAt === "string" && record.savedAt.length ? record.savedAt : new Date().toISOString(),
+      status: record.status === "finished" ? "finished" : "abandoned",
+      winnerPlayerId: Number.isInteger(record.winnerPlayerId) ? record.winnerPlayerId : null,
+      summary: typeof record.summary === "string" ? record.summary : "",
+      snapshot: cloneData(record.snapshot),
+      log: cloneLogEntries(record.log),
+      nextLogNumber: Number.isInteger(record.nextLogNumber) ? record.nextLogNumber : (Array.isArray(record.log) ? record.log.length + 1 : 1),
+      playerControllers: normalizePlayerControllers(record.playerControllers),
+      deckMode: normalizeDeckMode(record.deckMode)
+    };
+  }
+
+  function getHistoryStorage(options = {}) {
+    if (options.storage) {
+      return options.storage;
+    }
+
+    if (typeof window === "undefined" || !window.localStorage) {
+      return null;
+    }
+
+    try {
+      return window.localStorage;
+    } catch (error) {
+      return null;
+    }
+  }
+
+  function loadMatchHistory(options = {}) {
+    const storage = getHistoryStorage(options);
+    if (!storage || typeof storage.getItem !== "function") {
+      return [];
+    }
+
+    try {
+      const rawValue = storage.getItem(MATCH_HISTORY_STORAGE_KEY);
+      if (!rawValue) {
+        return [];
+      }
+
+      const parsed = JSON.parse(rawValue);
+      if (!Array.isArray(parsed)) {
+        return [];
+      }
+
+      return parsed
+        .map((record) => normalizeSavedMatchRecord(record))
+        .filter(Boolean)
+        .slice(0, MAX_SAVED_MATCHES);
+    } catch (error) {
+      return [];
+    }
+  }
+
+  function saveMatchHistory(records, options = {}) {
+    const normalizedRecords = Array.isArray(records)
+      ? records
+        .map((record) => normalizeSavedMatchRecord(record))
+        .filter(Boolean)
+        .slice(0, MAX_SAVED_MATCHES)
+      : [];
+    const storage = getHistoryStorage(options);
+
+    if (!storage || typeof storage.setItem !== "function") {
+      return false;
+    }
+
+    try {
+      storage.setItem(MATCH_HISTORY_STORAGE_KEY, JSON.stringify(normalizedRecords));
+      return true;
+    } catch (error) {
+      return false;
+    }
+  }
+
+  function getHistoryStatusLabel(status) {
+    return status === "finished" ? "Encerrada" : "Abandonada";
+  }
+
+  function getDeckModeLabel(deckMode) {
+    return normalizeDeckMode(deckMode) === DECK_MODES.SHARED ? "Compartilhado" : "Separado";
+  }
+
+  function buildSavedMatchSummary(state, status) {
+    const winner = state.winner;
+    const actionCount = state.log.length;
+    if (status === "finished" && winner) {
+      return `${winner.nome} venceu apos ${actionCount} acao(oes).`;
+    }
+
+    return `Partida abandonada apos ${actionCount} acao(oes).`;
+  }
+
+  function createSavedMatchRecord(state, status) {
+    return {
+      id: state.currentMatchId || createUniqueMatchId(),
+      savedAt: new Date().toISOString(),
+      status,
+      winnerPlayerId: state.winner ? state.winner.id : null,
+      summary: buildSavedMatchSummary(state, status),
+      snapshot: createStateSnapshot(state),
+      log: cloneLogEntries(state.log),
+      nextLogNumber: state.nextLogNumber,
+      playerControllers: normalizePlayerControllers(state.playerControllers),
+      deckMode: normalizeDeckMode(state.deckMode)
+    };
+  }
+
+  function archiveCurrentMatchIfNeeded(state, status, options = {}) {
+    if (!state?.isMatchStarted || state.hasCurrentMatchBeenSavedToHistory) {
+      return false;
+    }
+
+    if (!state.log.length) {
+      return false;
+    }
+
+    if (status === "finished" && !state.winner) {
+      return false;
+    }
+
+    const savedRecord = createSavedMatchRecord(state, status);
+    state.matchHistory = [savedRecord, ...(state.matchHistory || [])]
+      .map((record) => cloneSavedMatchRecord(record))
+      .slice(0, MAX_SAVED_MATCHES);
+    state.hasCurrentMatchBeenSavedToHistory = true;
+    saveMatchHistory(state.matchHistory, options);
+    return true;
+  }
+
+  function getSelectedHistoryMatch(state) {
+    if (!state || state.selectedHistoryMatchId == null || !Array.isArray(state.matchHistory)) {
+      return null;
+    }
+
+    return state.matchHistory.find((record) => record.id === state.selectedHistoryMatchId) || null;
+  }
+
+  function getHistoryRestoreTarget(record, selectedEntryId = null) {
+    if (!record) {
+      return null;
+    }
+
+    if (selectedEntryId != null) {
+      const selectedEntry = record.log.find((entry) => entry.id === selectedEntryId);
+      if (selectedEntry?.snapshot && !selectedEntry.snapshot.winnerPlayerId) {
+        const selectedIndex = record.log.findIndex((entry) => entry.id === selectedEntryId);
+        return {
+          snapshot: selectedEntry.snapshot,
+          log: cloneLogEntries(record.log.slice(0, selectedIndex + 1))
+        };
+      }
+    }
+
+    for (let index = record.log.length - 1; index >= 0; index -= 1) {
+      const entry = record.log[index];
+      if (entry?.snapshot && !entry.snapshot.winnerPlayerId) {
+        return {
+          snapshot: entry.snapshot,
+          log: cloneLogEntries(record.log.slice(0, index + 1))
+        };
+      }
+    }
+
+    if (record.snapshot) {
+      return {
+        snapshot: record.snapshot,
+        log: cloneLogEntries(record.log)
+      };
+    }
+
+    return null;
+  }
+
+  function restoreMatchFromHistory(record, previousState) {
+    const restoreTarget = getHistoryRestoreTarget(record, previousState?.selectedHistoryLogEntryId ?? null);
+    if (!restoreTarget) {
+      return previousState || createInitialState();
+    }
+
+    const restoredState = restoreStateFromSnapshot(restoreTarget.snapshot, restoreTarget.log);
+    restoredState.currentMatchId = createUniqueMatchId();
+    restoredState.matchHistory = (previousState?.matchHistory || []).map((item) => cloneSavedMatchRecord(item));
+    restoredState.hasCurrentMatchBeenSavedToHistory = false;
+    restoredState.selectedHistoryMatchId = null;
+    restoredState.selectedHistoryLogEntryId = null;
+    restoredState.selectedValidationIssueIndex = null;
+    restoredState.logValidationCopyFeedback = null;
+    restoredState.logValidationCopyFeedbackStatus = null;
+    restoredState.isLibraryOpen = false;
+    restoredState.isRulesOpen = false;
+    restoredState.isLogOpen = false;
+    restoredState.isHistoryOpen = false;
+    restoredState.selectedLogEntryId = null;
+    return restoredState;
+  }
+
   function createInitialState() {
     return {
       deck: [],
@@ -250,13 +479,19 @@
       isLibraryOpen: false,
       isRulesOpen: false,
       isLogOpen: false,
+      isHistoryOpen: false,
       selectedAttackerId: null,
       selectedEffectCard: null,
       selectedLogEntryId: null,
+      selectedHistoryMatchId: null,
+      selectedHistoryLogEntryId: null,
       isWinnerModalOpen: false,
       winner: null,
       turnNumber: 1,
       nextDefenseOrder: 1,
+      currentMatchId: null,
+      hasCurrentMatchBeenSavedToHistory: false,
+      matchHistory: [],
       log: [],
       nextLogNumber: 1,
       logValidationStatus: LOG_VALIDATION_STATUS.IDLE,
@@ -280,6 +515,9 @@
     nextState.isLibraryOpen = Boolean(previousState?.isLibraryOpen);
     nextState.isRulesOpen = Boolean(previousState?.isRulesOpen);
     nextState.isLogOpen = Boolean(previousState?.isLogOpen);
+    nextState.isHistoryOpen = Boolean(previousState?.isHistoryOpen);
+    nextState.matchHistory = (previousState?.matchHistory || []).map((record) => cloneSavedMatchRecord(record));
+    nextState.currentMatchId = createUniqueMatchId();
     nextState.isMatchStarted = true;
 
     if (nextState.deckMode === DECK_MODES.SHARED) {
@@ -306,10 +544,12 @@
     startTurn(nextState, 0, false);
     nextState.players[1].manaMax = 1;
     addLog(nextState, buildInitialLogMessage(nextState), buildInitialLogEvent(nextState));
+    nextState.selectedHistoryMatchId = null;
+    nextState.selectedHistoryLogEntryId = null;
     return nextState;
   }
 
-  function createRestartState(previousState) {
+  function createRestartState(previousState, options = {}) {
     const nextState = createInitialState();
 
     if (!previousState) {
@@ -321,6 +561,14 @@
     nextState.isLibraryOpen = Boolean(previousState.isLibraryOpen);
     nextState.isRulesOpen = Boolean(previousState.isRulesOpen);
     nextState.isLogOpen = Boolean(previousState.isLogOpen);
+    nextState.isHistoryOpen = Boolean(previousState.isHistoryOpen);
+    nextState.matchHistory = (previousState.matchHistory || []).map((record) => cloneSavedMatchRecord(record));
+
+    if (previousState.isMatchStarted) {
+      archiveCurrentMatchIfNeeded(previousState, previousState.winner ? "finished" : "abandoned", options);
+      nextState.matchHistory = (previousState.matchHistory || []).map((record) => cloneSavedMatchRecord(record));
+    }
+
     return nextState;
   }
 
@@ -374,6 +622,15 @@
       }
     }
 
+    return result;
+  }
+
+  function finalizeCompletedMatch(state, options = {}) {
+    const result = validateCurrentLog(state, {
+      alertOnFailure: true,
+      notifyFn: options.notifyFn
+    });
+    archiveCurrentMatchIfNeeded(state, "finished", options);
     return result;
   }
 
@@ -512,7 +769,7 @@
     resetLogValidation(state);
   }
 
-  function restoreStateFromSnapshot(snapshot, logEntries) {
+  function restoreStateFromSnapshot(snapshot, logEntries, stateOptions = {}) {
     const restoredState = {
       deck: cloneData(snapshot.deck),
       discardPile: cloneData(snapshot.discardPile),
@@ -528,13 +785,19 @@
       isLibraryOpen: snapshot.isLibraryOpen,
       isRulesOpen: snapshot.isRulesOpen,
       isLogOpen: snapshot.isLogOpen,
+      isHistoryOpen: Boolean(stateOptions.isHistoryOpen),
       selectedAttackerId: snapshot.selectedAttackerId,
       selectedEffectCard: cloneData(snapshot.selectedEffectCard),
       selectedLogEntryId: null,
+      selectedHistoryMatchId: stateOptions.selectedHistoryMatchId ?? null,
+      selectedHistoryLogEntryId: stateOptions.selectedHistoryLogEntryId ?? null,
       isWinnerModalOpen: Boolean(snapshot.winnerPlayerId),
       winner: null,
       turnNumber: snapshot.turnNumber,
       nextDefenseOrder: Number.isInteger(snapshot.nextDefenseOrder) ? snapshot.nextDefenseOrder : 1,
+      currentMatchId: stateOptions.currentMatchId ?? null,
+      hasCurrentMatchBeenSavedToHistory: Boolean(stateOptions.hasCurrentMatchBeenSavedToHistory),
+      matchHistory: (stateOptions.matchHistory || []).map((record) => cloneSavedMatchRecord(record)),
       log: cloneLogEntries(logEntries),
       nextLogNumber: logEntries.length + 1,
       logValidationStatus: LOG_VALIDATION_STATUS.IDLE,
@@ -1511,7 +1774,12 @@
     }
 
     const keptEntries = state.log.slice(0, targetIndex + 1);
-    return restoreStateFromSnapshot(keptEntries[targetIndex].snapshot, keptEntries);
+    return restoreStateFromSnapshot(keptEntries[targetIndex].snapshot, keptEntries, {
+      currentMatchId: state.currentMatchId,
+      hasCurrentMatchBeenSavedToHistory: state.hasCurrentMatchBeenSavedToHistory,
+      matchHistory: state.matchHistory,
+      isHistoryOpen: state.isHistoryOpen
+    });
   }
 
   function attemptRewindToLogEntry(state, entryId, options = {}) {
@@ -2511,11 +2779,8 @@
       resolution.message = `${resolution.message} ${winner.nome} venceu a partida.`;
     }
     addLog(state, resolution.message, resolution.event);
-    if (winner) {
-      validateCurrentLog(state, {
-        alertOnFailure: true,
-        notifyFn: options.notifyFn
-      });
+    if (state.winner) {
+      finalizeCompletedMatch(state, options);
     }
     return true;
   }
@@ -2643,11 +2908,8 @@
         message = `${message} ${winner.nome} venceu a partida.`;
       }
       addLog(state, message, event);
-      if (winner) {
-        validateCurrentLog(state, {
-          alertOnFailure: true,
-          notifyFn: options.notifyFn
-        });
+      if (state.winner) {
+        finalizeCompletedMatch(state, options);
       }
       return true;
     }
@@ -2907,7 +3169,11 @@
     }
 
     if (normalizedKey === "escape" && isViewingHistory(state)) {
-      state.selectedLogEntryId = null;
+      if (state.isHistoryOpen && state.selectedHistoryLogEntryId != null) {
+        state.selectedHistoryLogEntryId = null;
+      } else {
+        state.selectedLogEntryId = null;
+      }
       return true;
     }
 
@@ -3156,14 +3422,15 @@
   }
 
   function isAnySidePanelOpen(state) {
-    return Boolean(state.isLibraryOpen || state.isRulesOpen || state.isLogOpen);
+    return Boolean(state.isLibraryOpen || state.isRulesOpen || state.isLogOpen || state.isHistoryOpen);
   }
 
   function toggleExclusiveSidePanel(state, panelName) {
     const panelMap = {
       library: "isLibraryOpen",
       rules: "isRulesOpen",
-      log: "isLogOpen"
+      log: "isLogOpen",
+      history: "isHistoryOpen"
     };
     const targetFlag = panelMap[panelName];
 
@@ -3175,6 +3442,7 @@
     state.isLibraryOpen = false;
     state.isRulesOpen = false;
     state.isLogOpen = false;
+    state.isHistoryOpen = false;
     state[targetFlag] = nextValue;
   }
 
@@ -3543,6 +3811,22 @@
     return [...logEntries].reverse();
   }
 
+  function getSelectedHistoryLogEntry(state) {
+    const selectedMatch = getSelectedHistoryMatch(state);
+    if (!selectedMatch || state.selectedHistoryLogEntryId == null) {
+      return null;
+    }
+
+    return selectedMatch.log.find((entry) => entry.id === state.selectedHistoryLogEntryId) || null;
+  }
+
+  function getDefaultHistoryLogEntryId(record) {
+    const restoreTarget = getHistoryRestoreTarget(record);
+    const targetLog = restoreTarget?.log || [];
+    const targetEntry = targetLog[targetLog.length - 1] || null;
+    return targetEntry?.id ?? null;
+  }
+
   function getLogValidationStatusLabel(state) {
     if (state.logValidationStatus === LOG_VALIDATION_STATUS.VALID) {
       return `Log valido (${state.validatedEntryCount})`;
@@ -3630,6 +3914,108 @@
     });
 
     resultsElement.appendChild(issuesList);
+  }
+
+  function formatSavedMatchDate(savedAt) {
+    const parsedDate = new Date(savedAt);
+    if (Number.isNaN(parsedDate.getTime())) {
+      return savedAt || "Data desconhecida";
+    }
+
+    return parsedDate.toLocaleString("pt-BR");
+  }
+
+  function selectHistoryMatch(state, matchId) {
+    const selectedRecord = (state.matchHistory || []).find((record) => record.id === matchId) || null;
+    state.selectedHistoryMatchId = selectedRecord?.id ?? null;
+    state.selectedHistoryLogEntryId = selectedRecord ? getDefaultHistoryLogEntryId(selectedRecord) : null;
+    return selectedRecord;
+  }
+
+  function renderMatchHistory(state) {
+    const historyCount = document.getElementById("history-match-count");
+    const historyList = document.getElementById("match-history-list");
+    const historyDetails = document.getElementById("history-match-details");
+    const historyTitle = document.getElementById("history-match-title");
+    const historyMeta = document.getElementById("history-match-meta");
+    const historyLog = document.getElementById("history-log");
+    const restoreButton = document.getElementById("restore-history-match-button");
+
+    if (!historyCount || !historyList || !historyDetails || !historyTitle || !historyMeta || !historyLog || !restoreButton) {
+      return;
+    }
+
+    historyCount.textContent = `${state.matchHistory.length} partida(s)`;
+    historyList.innerHTML = "";
+    historyLog.innerHTML = "";
+
+    if (!state.matchHistory.length) {
+      const empty = document.createElement("div");
+      empty.className = "empty-state";
+      empty.textContent = "Nenhuma partida anterior foi salva ainda.";
+      historyList.appendChild(empty);
+      historyDetails.hidden = true;
+      restoreButton.disabled = true;
+      return;
+    }
+
+    state.matchHistory.forEach((record) => {
+      const winnerName = record.winnerPlayerId
+        ? record.snapshot.players.find((player) => player.id === record.winnerPlayerId)?.nome || "Vencedor"
+        : null;
+      const item = document.createElement("button");
+      item.type = "button";
+      item.className = record.id === state.selectedHistoryMatchId
+        ? "match-history-entry is-selected"
+        : "match-history-entry";
+      item.innerHTML = `
+        <span class="match-history-entry-title">${getHistoryStatusLabel(record.status)} · ${formatSavedMatchDate(record.savedAt)}</span>
+        <span class="match-history-entry-meta">${winnerName ? `${winnerName} venceu · ` : ""}${record.summary} ${getControllerDisplayLabel(record.playerControllers[0])} x ${getControllerDisplayLabel(record.playerControllers[1])} · Baralho ${getDeckModeLabel(record.deckMode)} · ${record.log.length} acao(oes)</span>
+      `;
+      item.addEventListener("click", () => {
+        selectHistoryMatch(state, record.id);
+        render(state);
+      });
+      historyList.appendChild(item);
+    });
+
+    const selectedRecord = getSelectedHistoryMatch(state);
+    if (!selectedRecord) {
+      historyDetails.hidden = true;
+      restoreButton.disabled = true;
+      return;
+    }
+
+    historyDetails.hidden = false;
+    const winnerName = selectedRecord.winnerPlayerId
+      ? selectedRecord.snapshot.players.find((player) => player.id === selectedRecord.winnerPlayerId)?.nome || "Vencedor"
+      : null;
+    historyTitle.textContent = `${getHistoryStatusLabel(selectedRecord.status)} · ${formatSavedMatchDate(selectedRecord.savedAt)}`;
+    historyMeta.textContent = `${selectedRecord.summary} ${winnerName ? `Vencedor: ${winnerName}. ` : ""}${getControllerDisplayLabel(selectedRecord.playerControllers[0])} x ${getControllerDisplayLabel(selectedRecord.playerControllers[1])} · Baralho ${getDeckModeLabel(selectedRecord.deckMode)}.`;
+    restoreButton.disabled = !getHistoryRestoreTarget(selectedRecord, state.selectedHistoryLogEntryId);
+
+    if (!selectedRecord.log.length) {
+      const empty = document.createElement("div");
+      empty.className = "empty-state";
+      empty.textContent = "Esta partida nao possui log salvo.";
+      historyLog.appendChild(empty);
+      return;
+    }
+
+    getDisplayLogEntries(selectedRecord.log).forEach((entry) => {
+      const item = document.createElement("button");
+      item.type = "button";
+      item.className = `log-entry${state.selectedHistoryLogEntryId === entry.id ? " is-selected" : ""}`;
+      item.innerHTML = `
+        <span class="log-entry-number">${entry.numero}</span>
+        <span class="log-entry-text">${entry.texto}</span>
+      `;
+      item.addEventListener("click", () => {
+        state.selectedHistoryLogEntryId = entry.id;
+        render(state);
+      });
+      historyLog.appendChild(item);
+    });
   }
 
   function getSelectedLogEntry(state) {
@@ -3733,13 +4119,21 @@
   }
 
   function isViewingHistory(state) {
-    return Boolean(state && state.isLogOpen && getSelectedLogEntry(state));
+    return Boolean(
+      state
+      && (
+        (state.isLogOpen && getSelectedLogEntry(state))
+        || (state.isHistoryOpen && getSelectedHistoryLogEntry(state))
+      )
+    );
   }
 
   function getRenderedGameState(state) {
-    const selectedEntry = getSelectedLogEntry(state);
+    const currentMatchEntry = state?.isLogOpen ? getSelectedLogEntry(state) : null;
+    const historyMatchEntry = state?.isHistoryOpen ? getSelectedHistoryLogEntry(state) : null;
+    const selectedEntry = historyMatchEntry || currentMatchEntry;
 
-    if (!state || !state.isLogOpen || !selectedEntry) {
+    if (!state || !selectedEntry) {
       return state;
     }
 
@@ -3888,9 +4282,11 @@
     const libraryPanel = document.getElementById("library-panel");
     const rulesPanel = document.getElementById("rules-panel");
     const logPanel = document.getElementById("log-panel");
+    const historyPanel = document.getElementById("history-panel");
     const toggleLibraryButton = document.getElementById("toggle-library-button");
     const toggleRulesButton = document.getElementById("toggle-rules-button");
     const toggleLogButton = document.getElementById("toggle-log-button");
+    const toggleHistoryButton = document.getElementById("toggle-history-button");
     const startButton = document.getElementById("start-button");
     const restartButton = document.getElementById("restart-button");
     const aiMatchStrip = document.getElementById("ai-match-strip");
@@ -3902,7 +4298,7 @@
     const anySidePanelOpen = isAnySidePanelOpen(state);
     const heroElement = document.querySelector(".hero");
 
-    if (boardElement && sideRail && libraryPanel && rulesPanel && logPanel && toggleLibraryButton && toggleRulesButton && toggleLogButton) {
+    if (boardElement && sideRail && libraryPanel && rulesPanel && logPanel && historyPanel && toggleLibraryButton && toggleRulesButton && toggleLogButton && toggleHistoryButton) {
       boardElement.classList.toggle("board-with-side-rail", anySidePanelOpen);
       boardElement.classList.toggle("is-history-view", viewingHistory);
       boardElement.classList.toggle("is-ai-turn", aiTurnActive);
@@ -3910,12 +4306,15 @@
       libraryPanel.setAttribute("aria-hidden", String(!state.isLibraryOpen));
       rulesPanel.setAttribute("aria-hidden", String(!state.isRulesOpen));
       logPanel.setAttribute("aria-hidden", String(!state.isLogOpen));
+      historyPanel.setAttribute("aria-hidden", String(!state.isHistoryOpen));
       toggleLibraryButton.classList.toggle("is-open", state.isLibraryOpen);
       toggleRulesButton.classList.toggle("is-open", state.isRulesOpen);
       toggleLogButton.classList.toggle("is-open", state.isLogOpen);
+      toggleHistoryButton.classList.toggle("is-open", state.isHistoryOpen);
       toggleLibraryButton.setAttribute("aria-expanded", String(state.isLibraryOpen));
       toggleRulesButton.setAttribute("aria-expanded", String(state.isRulesOpen));
       toggleLogButton.setAttribute("aria-expanded", String(state.isLogOpen));
+      toggleHistoryButton.setAttribute("aria-expanded", String(state.isHistoryOpen));
     }
 
     [0, 1].forEach((playerIndex) => {
@@ -4080,6 +4479,7 @@
 
     renderLogValidation(state);
     renderLibrary(renderedState);
+    renderMatchHistory(state);
 
     document.getElementById("player-bottom-panel").classList.toggle("active", matchStarted && renderedState.currentPlayerIndex === 0 && !renderedState.winner);
     document.getElementById("player-top-panel").classList.toggle("active", matchStarted && renderedState.currentPlayerIndex === 1 && !renderedState.winner);
@@ -4121,6 +4521,11 @@
       if (!gameState.isLogOpen) {
         gameState.selectedLogEntryId = null;
       }
+      render(gameState);
+    });
+
+    document.getElementById("toggle-history-button").addEventListener("click", () => {
+      toggleExclusiveSidePanel(gameState, "history");
       render(gameState);
     });
 
@@ -4219,6 +4624,17 @@
       render(gameState);
     });
 
+    document.getElementById("restore-history-match-button").addEventListener("click", () => {
+      const selectedRecord = getSelectedHistoryMatch(gameState);
+      if (!selectedRecord) {
+        return;
+      }
+
+      cancelAiTurn(gameState);
+      gameState = restoreMatchFromHistory(selectedRecord, gameState);
+      render(gameState);
+    });
+
     document.addEventListener("keydown", (event) => {
       if (!["a", "c", "e", "escape"].includes(event.key.toLowerCase())) {
         return;
@@ -4241,6 +4657,7 @@
   }
 
   let gameState = createInitialState();
+  gameState.matchHistory = loadMatchHistory();
 
   if (typeof document !== "undefined") {
     document.addEventListener("DOMContentLoaded", () => {
@@ -4258,6 +4675,8 @@
       CARD_COPIES_PER_TYPE,
       SEPARATE_DECK_COPIES_PER_TYPE,
       AI_STEP_DELAY_MS,
+      MATCH_HISTORY_STORAGE_KEY,
+      MAX_SAVED_MATCHES,
       DECK_MODES,
       PLAYER_CONTROLLER_TYPES,
       LOG_VALIDATION_STATUS,
@@ -4270,6 +4689,15 @@
       createDeck,
       shuffleDeck,
       createInitialState,
+      loadMatchHistory,
+      saveMatchHistory,
+      createSavedMatchRecord,
+      archiveCurrentMatchIfNeeded,
+      restoreMatchFromHistory,
+      getSelectedHistoryMatch,
+      getSelectedHistoryLogEntry,
+      selectHistoryMatch,
+      getHistoryRestoreTarget,
       startConfiguredMatch,
       createRestartState,
       drawCard,

@@ -84,6 +84,21 @@ function countCardInstanceOccurrences(state, instanceId) {
   return total;
 }
 
+function createMemoryStorage() {
+  const values = new Map();
+  return {
+    getItem(key) {
+      return values.has(key) ? values.get(key) : null;
+    },
+    setItem(key, value) {
+      values.set(key, String(value));
+    },
+    removeItem(key) {
+      values.delete(key);
+    }
+  };
+}
+
 test("initial state opens in pre-game with default player controllers", () => {
   const state = game.createInitialState();
 
@@ -164,6 +179,7 @@ test("new game keeps the currently open side menu", () => {
   previousState.isRulesOpen = true;
   previousState.isLibraryOpen = false;
   previousState.isLogOpen = false;
+  previousState.isHistoryOpen = false;
   previousState.selectedLogEntryId = 1;
   previousState.isWinnerModalOpen = true;
 
@@ -172,6 +188,7 @@ test("new game keeps the currently open side menu", () => {
   assert(restartedState.isRulesOpen === true, "restart should preserve the open rules menu");
   assert(restartedState.isLibraryOpen === false, "restart should keep unrelated menus closed");
   assert(restartedState.isLogOpen === false, "restart should keep unrelated menus closed");
+  assert(restartedState.isHistoryOpen === false, "restart should keep unrelated menus closed");
   assert(restartedState.selectedLogEntryId === null, "restart should clear any selected history line");
   assert(restartedState.isWinnerModalOpen === false, "restart should close the winner modal in the new game");
   assert(restartedState.isMatchStarted === false, "restart should return to pre-game");
@@ -195,6 +212,117 @@ test("new game preserves the configured deck mode", () => {
   const restartedState = game.createRestartState(previousState);
 
   assert(restartedState.deckMode === game.DECK_MODES.SHARED, "restart should preserve the configured deck mode");
+});
+
+test("match history loads from storage and keeps only the latest 20 entries", () => {
+  const storage = createMemoryStorage();
+  const fixtureState = createStartedState();
+  const fixtureSnapshot = snapshotStateForValidation(fixtureState);
+  const fixtureLog = JSON.parse(JSON.stringify(fixtureState.log));
+  const records = Array.from({ length: 25 }, (_, index) => ({
+    id: `saved-${index + 1}`,
+    savedAt: new Date(2026, 0, index + 1).toISOString(),
+    status: "finished",
+    winnerPlayerId: 1,
+    summary: `Partida ${index + 1}`,
+    snapshot: fixtureSnapshot,
+    log: fixtureLog,
+    nextLogNumber: 2,
+    playerControllers: [game.PLAYER_CONTROLLER_TYPES.HUMAN, game.PLAYER_CONTROLLER_TYPES.AI],
+    deckMode: game.DECK_MODES.SEPARATE
+  }));
+
+  storage.setItem(game.MATCH_HISTORY_STORAGE_KEY, JSON.stringify(records));
+
+  const loaded = game.loadMatchHistory({ storage });
+
+  assert(loaded.length === game.MAX_SAVED_MATCHES, "loaded history should be capped at 20 entries");
+  assert(loaded[0].id === "saved-1", "loaded history should keep the stored order");
+  assert(loaded[loaded.length - 1].id === "saved-20", "loaded history should drop older records beyond the cap");
+});
+
+test("match history loading tolerates malformed or unavailable storage", () => {
+  const brokenStorage = {
+    getItem() {
+      throw new Error("storage unavailable");
+    }
+  };
+
+  const malformedStorage = createMemoryStorage();
+  malformedStorage.setItem(game.MATCH_HISTORY_STORAGE_KEY, "{broken json");
+
+  const missingApi = game.loadMatchHistory({ storage: {} });
+  const broken = game.loadMatchHistory({ storage: brokenStorage });
+  const malformed = game.loadMatchHistory({ storage: malformedStorage });
+
+  assert(Array.isArray(missingApi) && missingApi.length === 0, "history loading should stay safe when storage has no getItem API");
+  assert(Array.isArray(broken) && broken.length === 0, "history loading should stay safe when storage access throws");
+  assert(Array.isArray(malformed) && malformed.length === 0, "history loading should stay safe when persisted data is malformed");
+});
+
+test("createRestartState archives an in-progress match as abandoned", () => {
+  const storage = createMemoryStorage();
+  const previousState = createStartedState();
+
+  const restartedState = game.createRestartState(previousState, { storage });
+
+  assert(restartedState.matchHistory.length === 1, "restarting an in-progress match should archive it once");
+  assert(restartedState.matchHistory[0].status === "abandoned", "restart archive should mark the match as abandoned");
+  assert(previousState.hasCurrentMatchBeenSavedToHistory === true, "archiving on restart should mark the old match as already saved");
+  assert(JSON.parse(storage.getItem(game.MATCH_HISTORY_STORAGE_KEY)).length === 1, "abandoned matches should be persisted to storage");
+});
+
+test("finished matches are archived only once", () => {
+  const storage = createMemoryStorage();
+  const state = createStartedState();
+  state.players[1].vida = 2;
+  state.players[0].manaAtual = 1;
+  state.players[0].manaMax = 1;
+  Object.assign(state.players[0].hand[0], {
+    id: "atk",
+    nome: "Finalizador",
+    categoria: "unidade",
+    efeito: null,
+    custo: 1,
+    ataque: 4,
+    vida: 3,
+    vidaBase: 3,
+    descricao: ""
+  });
+
+  const attackerInstanceId = state.players[0].hand[0].instanceId;
+  state.log[0].snapshot = snapshotStateForValidation(state);
+  game.playCard(state, 0, attackerInstanceId);
+  game.selectAttacker(state, 0, attackerInstanceId);
+  game.attackTarget(state, 0, "player", undefined, { storage });
+
+  const restartedState = game.createRestartState(state, { storage });
+
+  assert(state.matchHistory.length === 1, "winning should archive the match immediately");
+  assert(state.matchHistory[0].status === "finished", "winning should archive the match as finished");
+  assert(restartedState.matchHistory.length === 1, "restarting after a saved win should not duplicate the history entry");
+});
+
+test("history records can be restored as a live current match", () => {
+  const storage = createMemoryStorage();
+  const state = createStartedState();
+  state.players[0].manaAtual = 2;
+  state.players[0].manaMax = 2;
+  game.drawTurnCard(state, 0);
+  game.archiveCurrentMatchIfNeeded(state, "abandoned", { storage });
+
+  const record = state.matchHistory[0];
+  const pregameState = game.createRestartState(state, { storage });
+  pregameState.matchHistory = game.loadMatchHistory({ storage });
+
+  const selectedRecord = game.selectHistoryMatch(pregameState, record.id);
+  const restoredState = game.restoreMatchFromHistory(selectedRecord, pregameState);
+
+  assert(restoredState.isMatchStarted === true, "restoring a historical match should bring back an active match");
+  assert(restoredState.matchHistory.length === 1, "restoring should keep the historical record available");
+  assert(restoredState.hasCurrentMatchBeenSavedToHistory === false, "restored matches should be treated as a fresh live branch");
+  assert(restoredState.currentMatchId !== record.id, "restored matches should receive a new live match id");
+  assert(restoredState.selectedHistoryMatchId === null && restoredState.selectedHistoryLogEntryId === null, "restoring should clear history selections");
 });
 
 test("pre-game blocks shortcuts and gameplay actions until Start", () => {
@@ -904,14 +1032,23 @@ test("side rail helper reports when any optional panel is open", () => {
   assert(game.isAnySidePanelOpen({
     isLibraryOpen: false,
     isRulesOpen: false,
-    isLogOpen: false
+    isLogOpen: false,
+    isHistoryOpen: false
   }) === false, "helper should stay false when all optional panels are closed");
 
   assert(game.isAnySidePanelOpen({
     isLibraryOpen: false,
     isRulesOpen: true,
-    isLogOpen: false
+    isLogOpen: false,
+    isHistoryOpen: false
   }) === true, "helper should be true when any side panel is open");
+
+  assert(game.isAnySidePanelOpen({
+    isLibraryOpen: false,
+    isRulesOpen: false,
+    isLogOpen: false,
+    isHistoryOpen: true
+  }) === true, "helper should treat the history panel as another optional side panel");
 });
 
 test("exclusive side panel helper keeps only one menu open at a time", () => {
@@ -923,10 +1060,14 @@ test("exclusive side panel helper keeps only one menu open at a time", () => {
 
   game.toggleExclusiveSidePanel(state, "log");
   assert(state.isLogOpen === true, "log should become the only open panel");
-  assert(state.isLibraryOpen === false && state.isRulesOpen === false, "opening another panel should close the previous one");
+  assert(state.isLibraryOpen === false && state.isRulesOpen === false && state.isHistoryOpen === false, "opening another panel should close the previous one");
 
-  game.toggleExclusiveSidePanel(state, "log");
-  assert(state.isLogOpen === false, "clicking the active panel again should close it");
+  game.toggleExclusiveSidePanel(state, "history");
+  assert(state.isHistoryOpen === true, "history should become the only open panel");
+  assert(state.isLibraryOpen === false && state.isRulesOpen === false && state.isLogOpen === false, "history should close the other side panels");
+
+  game.toggleExclusiveSidePanel(state, "history");
+  assert(state.isHistoryOpen === false, "clicking the active history panel again should close it");
 });
 
 test("unit health package matches the new rebalance", () => {
@@ -1755,6 +1896,10 @@ test("layout markup removes the cancel button and keeps a pending effect slot", 
   assert(html.includes("id=\"validate-log-button\""), "the log panel should expose a manual validation button");
   assert(html.includes("id=\"copy-validation-issue-button\""), "the log panel should expose a button to copy detailed validation errors");
   assert(html.includes("id=\"log-validation-status\""), "the log panel should expose a validation status chip");
+  assert(html.includes("id=\"toggle-history-button\""), "the top menu should expose a dedicated history button");
+  assert(html.includes("id=\"history-panel\""), "the side rail should expose a dedicated history panel");
+  assert(html.includes("id=\"match-history-list\""), "the history panel should expose the saved match list");
+  assert(html.includes("id=\"restore-history-match-button\""), "the history panel should expose a restore action");
   assert(html.includes("compact-action-button"), "turn action buttons should use the compact button style");
   assert(html.includes("pressione Esc para voltar ao presente"), "rules should describe how to leave history view without dedicated buttons");
   assert(html.includes("so comeca quando voce clicar em Start"), "rules should describe the pre-game Start flow");
@@ -1765,6 +1910,7 @@ test("layout markup removes the cancel button and keeps a pending effect slot", 
   assert(!html.includes("botao de escudo"), "rules should no longer mention the removed defense button");
   assert(html.includes("IA vs IA"), "rules should describe how to configure ai vs ai");
   assert(html.includes("Validar log"), "rules should mention the manual log validation flow");
+  assert(html.includes("Use Historico para revisar partidas encerradas ou abandonadas"), "rules should mention the persistent match history flow");
   assert(!fs.readFileSync(path.join(process.cwd(), "styles.css"), "utf8").includes(".card-defense-toggle"), "styles should no longer keep the removed defense toggle button");
 });
 
@@ -2764,6 +2910,7 @@ test("rewind to a lethal attack entry should preserve the winner state", () => {
     id: "atk",
     nome: "Finalizador",
     categoria: "unidade",
+    efeito: null,
     custo: 1,
     ataque: 4,
     vida: 3,
@@ -2794,6 +2941,7 @@ test("lethal player attack logs a single final line with the winner embedded", (
     id: "atk",
     nome: "Finalizador",
     categoria: "unidade",
+    efeito: null,
     custo: 1,
     ataque: 4,
     vida: 3,
@@ -2859,6 +3007,7 @@ test("log validator passes after a lethal player attack", () => {
     id: "atk",
     nome: "Finalizador",
     categoria: "unidade",
+    efeito: null,
     custo: 1,
     ataque: 4,
     vida: 3,
@@ -2888,6 +3037,7 @@ test("lethal player attack auto-validates the log when the match ends", () => {
     id: "atk",
     nome: "Finalizador",
     categoria: "unidade",
+    efeito: null,
     custo: 1,
     ataque: 4,
     vida: 3,
@@ -2969,6 +3119,7 @@ test("automatic end-of-match validation alerts when the completed log is invalid
     id: "atk",
     nome: "Finalizador",
     categoria: "unidade",
+    efeito: null,
     custo: 1,
     ataque: 4,
     vida: 3,
