@@ -220,6 +220,20 @@
     };
   }
 
+  function createBoardUnit(card) {
+    return {
+      ...card,
+      estado: "campo",
+      podeAgir: true,
+      jaAtacouNoTurno: false,
+      isDefending: false,
+      defendingTargetType: null,
+      defendingTargetPlayerIndex: null,
+      defendingTargetInstanceId: null,
+      defenseOrder: null
+    };
+  }
+
   function createInitialState() {
     return {
       deck: [],
@@ -242,6 +256,7 @@
       isWinnerModalOpen: false,
       winner: null,
       turnNumber: 1,
+      nextDefenseOrder: 1,
       log: [],
       nextLogNumber: 1,
       logValidationStatus: LOG_VALIDATION_STATUS.IDLE,
@@ -456,6 +471,7 @@
       selectedEffectCard: cloneData(state.selectedEffectCard),
       winnerPlayerId: state.winner ? state.winner.id : null,
       turnNumber: state.turnNumber,
+      nextDefenseOrder: state.nextDefenseOrder,
       players: cloneData(state.players)
     };
   }
@@ -507,6 +523,7 @@
       isWinnerModalOpen: Boolean(snapshot.winnerPlayerId),
       winner: null,
       turnNumber: snapshot.turnNumber,
+      nextDefenseOrder: Number.isInteger(snapshot.nextDefenseOrder) ? snapshot.nextDefenseOrder : 1,
       log: cloneLogEntries(logEntries),
       nextLogNumber: logEntries.length + 1,
       logValidationStatus: LOG_VALIDATION_STATUS.IDLE,
@@ -655,7 +672,11 @@
       issues.push(createValidationIssue(entry, "invalid-turn-number", "O snapshot possui turnNumber invalido."));
     }
 
-    snapshot.players.forEach((player) => {
+    if (!Number.isInteger(snapshot.nextDefenseOrder) || snapshot.nextDefenseOrder < 1) {
+      issues.push(createValidationIssue(entry, "invalid-defense-order-sequence", "O snapshot possui nextDefenseOrder invalido."));
+    }
+
+    snapshot.players.forEach((player, playerIndex) => {
       if (player.vida < 0 || player.vida > MAX_HEALTH) {
         issues.push(createValidationIssue(entry, "invalid-player-health", `${player.nome} possui vida fora dos limites.`));
       }
@@ -673,8 +694,35 @@
           issues.push(createValidationIssue(entry, "invalid-unit-health", `${unit.nome} possui vida invalida no snapshot.`));
         }
 
-        if (unit.isDefending && (!Number.isInteger(unit.defenseTurnNumber) || !unit.jaAtacouNoTurno)) {
-          issues.push(createValidationIssue(entry, "invalid-defense-state", `${unit.nome} esta em defesa com estado invalido.`));
+        if (!unit.isDefending) {
+          return;
+        }
+
+        if (!unit.podeAgir) {
+          issues.push(createValidationIssue(entry, "invalid-defense-state", `${unit.nome} esta defendendo sem poder agir.`));
+        }
+
+        if (!Number.isInteger(unit.defenseOrder) || unit.defenseOrder < 1 || unit.defenseOrder >= snapshot.nextDefenseOrder) {
+          issues.push(createValidationIssue(entry, "invalid-defense-order", `${unit.nome} possui defenseOrder invalido.`));
+        }
+
+        if (unit.defendingTargetPlayerIndex !== playerIndex) {
+          issues.push(createValidationIssue(entry, "invalid-defense-owner", `${unit.nome} aponta para um alvo de defesa fora do proprio lado.`));
+          return;
+        }
+
+        if (unit.defendingTargetType === "player") {
+          return;
+        }
+
+        if (unit.defendingTargetType !== "unit") {
+          issues.push(createValidationIssue(entry, "invalid-defense-target-type", `${unit.nome} possui um tipo de alvo de defesa invalido.`));
+          return;
+        }
+
+        const targetUnit = player.board.find((candidate) => candidate.instanceId === unit.defendingTargetInstanceId);
+        if (!targetUnit || targetUnit.instanceId === unit.instanceId || targetUnit.isDefending) {
+          issues.push(createValidationIssue(entry, "invalid-defense-target", `${unit.nome} protege uma unidade invalida no snapshot.`));
         }
       });
     });
@@ -791,14 +839,7 @@
           return { ok: false, code: "invalid-unit-mana", message: "O replay nao conseguiu pagar a mana da unidade baixada." };
         }
 
-        player.board.push({
-          ...card,
-          estado: "campo",
-          podeAgir: true,
-          jaAtacouNoTurno: false,
-          isDefending: false,
-          defenseTurnNumber: null
-        });
+        player.board.push(createBoardUnit(card));
         state.selectedAttackerId = null;
         return { ok: true };
       }
@@ -879,6 +920,7 @@
         if (event.defeated) {
           removeCardByInstanceId(opponent.board, event.targetInstanceId);
           moveCardToDiscardForOwner(state, target, event.targetPlayerIndex);
+          cleanupInvalidDefenseAssignments(state);
         } else if (target.vida <= 0) {
           return { ok: false, code: "effect-unit-defeat-mismatch", message: "O replay derrotou a unidade, mas o evento nao marcou derrota." };
         }
@@ -948,6 +990,10 @@
           return { ok: false, code: "invalid-attack-player", message: "O replay nao encontrou o ataque ao jogador correto." };
         }
 
+        if (isCombatTargetProtected(state, "player", event.targetPlayerIndex)) {
+          return { ok: false, code: "protected-player-target", message: "O replay encontrou um ataque contra um jogador protegido." };
+        }
+
         const attacker = findCardByInstanceId(player.board, event.attackerInstanceId);
         if (!attacker) {
           return { ok: false, code: "missing-attacker", message: "A unidade atacante nao existe no replay." };
@@ -996,6 +1042,10 @@
           return { ok: false, code: "invalid-attack-unit", message: "O replay nao encontrou o ataque a unidade correto." };
         }
 
+        if (isCombatTargetProtected(state, "unit", event.targetPlayerIndex, event.targetInstanceId)) {
+          return { ok: false, code: "protected-unit-target", message: "O replay encontrou um ataque contra uma unidade protegida." };
+        }
+
         const attacker = findCardByInstanceId(player.board, event.attackerInstanceId);
         const target = findCardByInstanceId(opponent.board, event.targetInstanceId);
         if (!attacker || !target) {
@@ -1013,6 +1063,7 @@
         if (event.defeated) {
           removeCardByInstanceId(opponent.board, event.targetInstanceId);
           moveCardToDiscardForOwner(state, target, event.targetPlayerIndex);
+          cleanupInvalidDefenseAssignments(state);
         } else if (target.vida <= 0) {
           return { ok: false, code: "attack-unit-defeat-mismatch", message: "O replay derrotou a unidade, mas o evento nao marcou derrota." };
         }
@@ -1026,14 +1077,20 @@
         }
 
         const unit = findCardByInstanceId(player.board, event.unitInstanceId);
-        if (!unit || !canUnitEnterDefense(state, event.playerIndex, unit)) {
+        if (!unit || !canUnitProtectTarget(state, event.playerIndex, unit, event.targetType, event.targetPlayerIndex, event.targetInstanceId || null)) {
           return { ok: false, code: "invalid-enter-defense-state", message: "A unidade nao pode entrar em defesa no replay." };
         }
 
         state.selectedAttackerId = null;
         unit.isDefending = true;
-        unit.defenseTurnNumber = state.turnNumber;
-        unit.jaAtacouNoTurno = true;
+        unit.defendingTargetType = event.targetType;
+        unit.defendingTargetPlayerIndex = event.targetPlayerIndex;
+        unit.defendingTargetInstanceId = event.targetType === "unit" ? event.targetInstanceId : null;
+        unit.defenseOrder = state.nextDefenseOrder;
+        state.nextDefenseOrder += 1;
+        if (!event.reassigned) {
+          unit.jaAtacouNoTurno = true;
+        }
         return { ok: true };
       }
 
@@ -1047,8 +1104,7 @@
           return { ok: false, code: "invalid-cancel-defense-state", message: "A unidade nao pode cancelar a defesa no replay." };
         }
 
-        unit.isDefending = false;
-        unit.defenseTurnNumber = null;
+        clearDefenseState(unit);
         unit.jaAtacouNoTurno = false;
         unit.podeAgir = true;
         return { ok: true };
@@ -1371,6 +1427,13 @@
       || compareText(left.nome, right.nome);
   }
 
+  function compareUnitsForAiDefense(left, right) {
+    return ((right.custo || 0) - (left.custo || 0))
+      || ((right.vidaBase || 0) - (left.vidaBase || 0))
+      || (right.ataque - left.ataque)
+      || compareText(left.nome, right.nome);
+  }
+
   function getAiSupportPriority(card) {
     if (card.efeito === "aura_ataque") {
       return 0;
@@ -1395,8 +1458,12 @@
 
     const player = getCurrentPlayer(state);
     const opponent = getOpponentPlayer(state);
+    const playerIndex = state.currentPlayerIndex;
+    const opponentIndex = (playerIndex + 1) % 2;
     const playableCards = getAiPlayableCards(state);
     const readyAttackers = getAiReadyAttackers(state);
+    const attackableOpponentUnits = opponent.board.filter((unit) => !isCombatTargetProtected(state, "unit", opponentIndex, unit.instanceId));
+    const opponentHeroProtected = isCombatTargetProtected(state, "player", opponentIndex);
     const damageCards = playableCards
       .filter((card) => card.efeito === "dano_direto")
       .sort(compareCardsByCostAsc);
@@ -1410,15 +1477,14 @@
       .filter((card) => card.categoria === "unidade")
       .sort(compareUnitsForAiPlay);
     const defendableUnits = player.board
-      .filter((unit) => canUnitEnterDefense(state, state.currentPlayerIndex, unit))
-      .sort((left, right) => ((right.custo || 0) - (left.custo || 0))
-        || ((right.vidaBase || 0) - (left.vidaBase || 0))
-        || (right.ataque - left.ataque)
-        || compareText(left.nome, right.nome));
+      .filter((unit) => canUnitEnterDefense(state, playerIndex, unit))
+      .sort(compareUnitsForAiDefense);
 
-    const lethalAttacker = [...readyAttackers]
-      .sort(compareAttackersByPowerAsc(player))
-      .find((attacker) => getUnitAttack(attacker, player) >= opponent.vida);
+    const lethalAttacker = opponentHeroProtected
+      ? null
+      : [...readyAttackers]
+        .sort(compareAttackersByPowerAsc(player))
+        .find((attacker) => getUnitAttack(attacker, player) >= opponent.vida);
     if (lethalAttacker) {
       return {
         type: "attack-player",
@@ -1437,7 +1503,7 @@
     }
 
     for (const card of damageCards) {
-      const killTargets = opponent.board
+      const killTargets = attackableOpponentUnits
         .filter((unit) => unit.vida <= getMitigatedDamage(unit, card.valor))
         .sort(compareUnitsByThreatDesc);
 
@@ -1496,7 +1562,7 @@
       };
     }
 
-    const killableTargets = opponent.board
+    const killableTargets = attackableOpponentUnits
       .filter((target) => readyAttackers.some((attacker) => getMitigatedDamage(target, getUnitAttack(attacker, player)) >= target.vida))
       .sort(compareUnitsByThreatDesc);
     if (killableTargets[0]) {
@@ -1515,8 +1581,8 @@
       }
     }
 
-    if (opponent.board.length > 0 && readyAttackers[0]) {
-      const chosenTarget = [...opponent.board].sort(compareUnitsByThreatDesc)[0];
+    if (attackableOpponentUnits.length > 0 && readyAttackers[0]) {
+      const chosenTarget = [...attackableOpponentUnits].sort(compareUnitsByThreatDesc)[0];
       const attacker = [...readyAttackers].sort(compareAttackersByPowerDesc(player))[0];
 
       return {
@@ -1539,7 +1605,7 @@
       };
     }
 
-    if (readyAttackers[0]) {
+    if (readyAttackers[0] && !opponentHeroProtected) {
       const attacker = [...readyAttackers].sort(compareAttackersByPowerDesc(player))[0];
       return {
         type: "attack-player",
@@ -1549,10 +1615,44 @@
     }
 
     if (opponent.board.length > 0 && defendableUnits[0]) {
+      const totalEnemyThreat = opponent.board.reduce((total, unit) => total + getUnitAttack(unit, opponent), 0);
+      const heroUnderPressure = player.vida <= 12 || totalEnemyThreat >= Math.max(6, player.vida - 6);
+      const defenseTargetUnit = [...player.board]
+        .filter((unit) => !unit.isDefending)
+        .sort((left, right) => {
+          const leftDefenders = getDefendersForTarget(state, playerIndex, "unit", left.instanceId).length;
+          const rightDefenders = getDefendersForTarget(state, playerIndex, "unit", right.instanceId).length;
+          return (leftDefenders - rightDefenders)
+            || compareUnitsByThreatDesc(left, right);
+        })[0] || null;
+      const chosenTarget = heroUnderPressure
+        ? {
+          type: "player",
+          targetPlayerIndex: playerIndex,
+          targetInstanceId: null,
+          label: player.nome
+        }
+        : defenseTargetUnit
+          ? {
+            type: "unit",
+            targetPlayerIndex: playerIndex,
+            targetInstanceId: defenseTargetUnit.instanceId,
+            label: defenseTargetUnit.nome
+          }
+          : {
+            type: "player",
+            targetPlayerIndex: playerIndex,
+            targetInstanceId: null,
+            label: player.nome
+          };
+
       return {
-        type: "defend-unit",
-        targetInstanceId: defendableUnits[0].instanceId,
-        text: `IA colocou ${defendableUnits[0].nome} em defesa.`
+        type: "defend-target",
+        defenderInstanceId: defendableUnits[0].instanceId,
+        targetType: chosenTarget.type,
+        targetPlayerIndex: chosenTarget.targetPlayerIndex,
+        targetInstanceId: chosenTarget.targetInstanceId,
+        text: `IA colocou ${defendableUnits[0].nome} para defender ${chosenTarget.label}.`
       };
     }
 
@@ -1617,8 +1717,15 @@
         && attackTarget(state, playerIndex, "support", action.targetInstanceId);
     }
 
-    if (action.type === "defend-unit") {
-      didAct = enterDefenseMode(state, playerIndex, action.targetInstanceId);
+    if (action.type === "defend-target") {
+      didAct = enterDefenseMode(
+        state,
+        playerIndex,
+        action.defenderInstanceId,
+        action.targetType,
+        action.targetPlayerIndex,
+        action.targetInstanceId
+      );
     }
 
     if (action.type === "end-turn") {
@@ -1750,12 +1857,112 @@
     }
 
     overlayData.lifeText = `VIDA ${card.vida}/${card.vidaBase}`;
-    overlayData.stateText = card.isDefending ? "DEFENDENDO" : card.jaAtacouNoTurno ? "JA ATACOU" : card.podeAgir ? "PRONTA" : "EM ESPERA";
+    overlayData.stateText = card.isDefending
+      ? card.defendingTargetType === "player"
+        ? "DEF HEROI"
+        : "DEF ALIADO"
+      : card.jaAtacouNoTurno
+        ? "JA ATACOU"
+        : card.podeAgir
+          ? "PRONTA"
+          : "EM ESPERA";
     return overlayData;
   }
 
   function getAvailableAttackers(player) {
     return player.board.filter((unit) => unit.podeAgir && !unit.jaAtacouNoTurno && !unit.isDefending);
+  }
+
+  function clearDefenseState(unit) {
+    if (!unit) {
+      return;
+    }
+
+    unit.isDefending = false;
+    unit.defendingTargetType = null;
+    unit.defendingTargetPlayerIndex = null;
+    unit.defendingTargetInstanceId = null;
+    unit.defenseOrder = null;
+  }
+
+  function doesUnitProtectTarget(unit, targetType, targetPlayerIndex, targetInstanceId = null) {
+    if (!unit || !unit.isDefending) {
+      return false;
+    }
+
+    if (unit.defendingTargetType !== targetType || unit.defendingTargetPlayerIndex !== targetPlayerIndex) {
+      return false;
+    }
+
+    if (targetType === "player") {
+      return true;
+    }
+
+    return unit.defendingTargetInstanceId === targetInstanceId;
+  }
+
+  function getDefenseTargetUnit(state, targetPlayerIndex, targetInstanceId) {
+    return findCardByInstanceId(state?.players?.[targetPlayerIndex]?.board, targetInstanceId);
+  }
+
+  function getDefendersForTarget(state, targetPlayerIndex, targetType, targetInstanceId = null) {
+    const player = state?.players?.[targetPlayerIndex];
+
+    if (!player) {
+      return [];
+    }
+
+    return player.board
+      .filter((unit) => doesUnitProtectTarget(unit, targetType, targetPlayerIndex, targetInstanceId))
+      .sort((left, right) => (left.defenseOrder || 0) - (right.defenseOrder || 0));
+  }
+
+  function isCombatTargetProtected(state, targetType, targetPlayerIndex, targetInstanceId = null) {
+    return getDefendersForTarget(state, targetPlayerIndex, targetType, targetInstanceId).length > 0;
+  }
+
+  function cleanupInvalidDefenseAssignments(state) {
+    if (!state?.players) {
+      return;
+    }
+
+    state.players.forEach((player, playerIndex) => {
+      player.board.forEach((unit) => {
+        if (!unit.isDefending) {
+          clearDefenseState(unit);
+          return;
+        }
+
+        if (unit.defendingTargetPlayerIndex !== playerIndex) {
+          clearDefenseState(unit);
+          return;
+        }
+
+        if (unit.defendingTargetType === "player") {
+          unit.defendingTargetInstanceId = null;
+          return;
+        }
+
+        const targetUnit = getDefenseTargetUnit(state, playerIndex, unit.defendingTargetInstanceId);
+        if (!targetUnit || targetUnit.instanceId === unit.instanceId || targetUnit.isDefending) {
+          clearDefenseState(unit);
+        }
+      });
+    });
+  }
+
+  function canUnitSelectForAction(state, playerIndex, unit) {
+    return Boolean(
+      state
+      && unit
+      && state.isMatchStarted
+      && !state.winner
+      && state.currentPlayerIndex === playerIndex
+      && !state.selectedEffectCard
+      && unit.estado === "campo"
+      && unit.podeAgir
+      && ((!unit.isDefending && !unit.jaAtacouNoTurno) || unit.isDefending)
+    );
   }
 
   function canUnitEnterDefense(state, playerIndex, unit) {
@@ -1782,8 +1989,46 @@
       && state.currentPlayerIndex === playerIndex
       && unit.estado === "campo"
       && unit.isDefending
-      && unit.defenseTurnNumber === state.turnNumber
     );
+  }
+
+  function canUnitProtectTarget(state, playerIndex, unit, targetType, targetPlayerIndex, targetInstanceId = null) {
+    if (
+      !state
+      || !unit
+      || !state.isMatchStarted
+      || state.winner
+      || state.currentPlayerIndex !== playerIndex
+      || state.selectedEffectCard
+      || unit.estado !== "campo"
+      || targetPlayerIndex !== playerIndex
+    ) {
+      return false;
+    }
+
+    const canManageDefense = unit.isDefending || (unit.podeAgir && !unit.jaAtacouNoTurno && !unit.isDefending);
+    if (!canManageDefense) {
+      return false;
+    }
+
+    if (targetType === "player") {
+      return true;
+    }
+
+    if (targetType !== "unit" || !targetInstanceId) {
+      return false;
+    }
+
+    const targetUnit = getDefenseTargetUnit(state, playerIndex, targetInstanceId);
+    return Boolean(targetUnit && targetUnit.instanceId !== unit.instanceId && !targetUnit.isDefending);
+  }
+
+  function getSelectedUnit(state, playerIndex = state?.currentPlayerIndex) {
+    if (!state || !state.selectedAttackerId || (playerIndex !== 0 && playerIndex !== 1)) {
+      return null;
+    }
+
+    return findCardByInstanceId(state.players[playerIndex]?.board, state.selectedAttackerId);
   }
 
   function getMitigatedDamage(unit, rawDamage) {
@@ -1888,6 +2133,7 @@
     if (target.vida <= 0) {
       const [defeatedUnit] = opponent.board.splice(targetIndex, 1);
       moveCardToDiscardForOwner(state, defeatedUnit, (state.currentPlayerIndex + 1) % 2);
+      cleanupInvalidDefenseAssignments(state);
       return {
         message: `${player.nome} usou ${card.nome} e causou ${inflictedDamage} de dano em ${target.nome}, derrotando a unidade.`,
         event: {
@@ -2039,14 +2285,7 @@
     state.selectedAttackerId = null;
 
     if (card.categoria === "unidade") {
-      player.board.push({
-        ...card,
-        estado: "campo",
-        podeAgir: true,
-        jaAtacouNoTurno: false,
-        isDefending: false,
-        defenseTurnNumber: null
-      });
+      player.board.push(createBoardUnit(card));
       addLog(state, `${player.nome} baixou ${card.nome} no campo por ${card.custo} mana.`, {
         kind: LOG_EVENT_TYPES.PLAY_UNIT,
         playerIndex,
@@ -2087,11 +2326,15 @@
     const player = state.players[playerIndex];
     const unit = player.board.find((card) => card.instanceId === unitInstanceId);
 
-    if (!unit || !unit.podeAgir || unit.jaAtacouNoTurno || unit.isDefending) {
+    if (!canUnitSelectForAction(state, playerIndex, unit)) {
       return false;
     }
 
     if (state.selectedAttackerId === unitInstanceId) {
+      if (unit.isDefending) {
+        return cancelDefenseMode(state, playerIndex, unitInstanceId);
+      }
+
       state.selectedAttackerId = null;
       return true;
     }
@@ -2122,6 +2365,12 @@
     state.selectedAttackerId = null;
 
     if (targetType === "player") {
+      if (isCombatTargetProtected(state, "player", (playerIndex + 1) % 2)) {
+        attacker.jaAtacouNoTurno = false;
+        state.selectedAttackerId = attacker.instanceId;
+        return false;
+      }
+
       opponent.vida = Math.max(opponent.vida - attackValue, 0);
       const winner = checkWinner(state);
       const event = {
@@ -2179,12 +2428,19 @@
     }
 
     const target = opponent.board[targetIndex];
+    if (isCombatTargetProtected(state, "unit", (playerIndex + 1) % 2, target.instanceId)) {
+      attacker.jaAtacouNoTurno = false;
+      state.selectedAttackerId = attacker.instanceId;
+      return false;
+    }
+
     const inflictedDamage = getMitigatedDamage(target, attackValue);
     target.vida = Math.max(target.vida - inflictedDamage, 0);
 
     if (target.vida <= 0) {
       const [defeatedUnit] = opponent.board.splice(targetIndex, 1);
       moveCardToDiscardForOwner(state, defeatedUnit, (playerIndex + 1) % 2);
+      cleanupInvalidDefenseAssignments(state);
       addLog(state, `${attacker.nome} atacou ${target.nome}, causou ${inflictedDamage} de dano e derrotou a unidade.`, {
         kind: LOG_EVENT_TYPES.ATTACK_UNIT,
         playerIndex,
@@ -2209,22 +2465,41 @@
     return true;
   }
 
-  function enterDefenseMode(state, playerIndex, unitInstanceId) {
+  function enterDefenseMode(state, playerIndex, unitInstanceId, targetType, targetPlayerIndex = playerIndex, targetInstanceId = null) {
     const player = state.players[playerIndex];
     const unit = player.board.find((card) => card.instanceId === unitInstanceId);
 
-    if (!canUnitEnterDefense(state, playerIndex, unit)) {
+    if (!canUnitProtectTarget(state, playerIndex, unit, targetType, targetPlayerIndex, targetInstanceId)) {
       return false;
     }
 
+    const targetLabel = targetType === "player"
+      ? player.nome
+      : getDefenseTargetUnit(state, targetPlayerIndex, targetInstanceId)?.nome;
+
+    if (!targetLabel || doesUnitProtectTarget(unit, targetType, targetPlayerIndex, targetInstanceId)) {
+      return false;
+    }
+
+    const isReassigned = unit.isDefending;
     state.selectedAttackerId = null;
     unit.isDefending = true;
-    unit.defenseTurnNumber = state.turnNumber;
-    unit.jaAtacouNoTurno = true;
-    addLog(state, `${player.nome} colocou ${unit.nome} em defesa.`, {
+    unit.defendingTargetType = targetType;
+    unit.defendingTargetPlayerIndex = targetPlayerIndex;
+    unit.defendingTargetInstanceId = targetType === "unit" ? targetInstanceId : null;
+    unit.defenseOrder = state.nextDefenseOrder;
+    state.nextDefenseOrder += 1;
+    if (!isReassigned) {
+      unit.jaAtacouNoTurno = true;
+    }
+    addLog(state, `${player.nome} colocou ${unit.nome} para defender ${targetLabel}.`, {
       kind: LOG_EVENT_TYPES.ENTER_DEFENSE,
       playerIndex,
-      unitInstanceId: unit.instanceId
+      unitInstanceId: unit.instanceId,
+      targetType,
+      targetPlayerIndex,
+      targetInstanceId: targetType === "unit" ? targetInstanceId : null,
+      reassigned: isReassigned
     });
     return true;
   }
@@ -2237,8 +2512,8 @@
       return false;
     }
 
-    unit.isDefending = false;
-    unit.defenseTurnNumber = null;
+    state.selectedAttackerId = null;
+    clearDefenseState(unit);
     unit.jaAtacouNoTurno = false;
     unit.podeAgir = true;
     addLog(state, `${player.nome} cancelou a defesa de ${unit.nome}.`, {
@@ -2284,7 +2559,16 @@
       return resolveEffectTarget(state, state.currentPlayerIndex, "player");
     }
 
-    if (state.selectedAttackerId && targetPlayerIndex !== state.currentPlayerIndex) {
+    const selectedUnit = getSelectedUnit(state);
+    if (!selectedUnit) {
+      return false;
+    }
+
+    if (targetPlayerIndex === state.currentPlayerIndex) {
+      return enterDefenseMode(state, state.currentPlayerIndex, selectedUnit.instanceId, "player", targetPlayerIndex);
+    }
+
+    if (!isCombatTargetProtected(state, "player", targetPlayerIndex)) {
       return attackTarget(state, state.currentPlayerIndex, "player");
     }
 
@@ -2306,15 +2590,15 @@
     const canDraw = getDrawPile(state, playerIndex).length > 0 && canAfford(player, DRAW_COST);
     const playableCards = player.hand.filter((card) => canPlayCard(state, playerIndex, card)).length;
     const readyAttackers = getAvailableAttackers(player).length;
-    const defendableUnits = player.board.filter((unit) => canUnitEnterDefense(state, playerIndex, unit)).length;
+    const defenseMovers = player.board.filter((unit) => canUnitSelectForAction(state, playerIndex, unit) && unit.isDefending).length;
     const pendingSelection = Boolean(state.selectedAttackerId || state.selectedEffectCard);
-    const hasAny = canDraw || playableCards > 0 || readyAttackers > 0 || defendableUnits > 0 || pendingSelection;
+    const hasAny = canDraw || playableCards > 0 || readyAttackers > 0 || defenseMovers > 0 || pendingSelection;
 
     return {
       canDraw,
       playableCards,
       readyAttackers,
-      defendableUnits,
+      defenseMovers,
       pendingSelection,
       hasAny
     };
@@ -2391,7 +2675,8 @@
         return resolveEffectTarget(state, state.currentPlayerIndex, "player");
       }
 
-      if (state.selectedAttackerId) {
+      const selectedUnit = getSelectedUnit(state);
+      if (selectedUnit && !selectedUnit.isDefending) {
         return attackTarget(state, state.currentPlayerIndex, "player");
       }
 
@@ -2432,8 +2717,6 @@
     player.board.forEach((unit) => {
       unit.podeAgir = true;
       unit.jaAtacouNoTurno = false;
-      unit.isDefending = false;
-      unit.defenseTurnNumber = null;
     });
   }
 
@@ -2448,6 +2731,7 @@
     player.manaMax = Math.min(manaBase + secondPlayerBonus, MAX_MANA);
     player.manaAtual = player.manaMax;
     refreshUnitsForTurn(player);
+    cleanupInvalidDefenseAssignments(state);
   }
 
   function endTurn(state) {
@@ -2519,7 +2803,7 @@
     }
 
     if (card.isDefending) {
-      return "DEFENDENDO";
+      return card.defendingTargetType === "player" ? "DEF HEROI" : "DEF ALIADO";
     }
 
     if (card.jaAtacouNoTurno) {
@@ -2658,7 +2942,16 @@
       return null;
     }
 
-    if (state.selectedAttackerId && targetPlayerIndex !== state.currentPlayerIndex) {
+    const selectedUnit = getSelectedUnit(state);
+    if (!selectedUnit) {
+      return null;
+    }
+
+    if (targetPlayerIndex === state.currentPlayerIndex && canUnitProtectTarget(state, state.currentPlayerIndex, selectedUnit, "player", targetPlayerIndex)) {
+      return "defend";
+    }
+
+    if (!selectedUnit.isDefending && targetPlayerIndex !== state.currentPlayerIndex && !isCombatTargetProtected(state, "player", targetPlayerIndex)) {
       return "attack";
     }
 
@@ -2720,12 +3013,12 @@
       interactive = false,
       selected = false,
       className = "",
+      entryClassName = "",
       onClick,
-      player,
-      defenseToggle = null
+      player
     } = config;
     const classes = ["card", className];
-    wrapper.className = `card-entry${card.isDefending ? " is-defending" : ""}`;
+    wrapper.className = `card-entry${card.isDefending ? " is-defending" : ""}${entryClassName ? ` ${entryClassName}` : ""}`;
 
     if (interactive) {
       classes.push("playable");
@@ -2761,23 +3054,6 @@
 
     wrapper.appendChild(button);
 
-    if (defenseToggle) {
-      const defenseButton = document.createElement("button");
-      defenseButton.type = "button";
-      defenseButton.className = `card-defense-toggle${defenseToggle.active ? " is-active" : ""}`;
-      defenseButton.textContent = defenseToggle.active ? "CAN" : "DEF";
-      defenseButton.title = defenseToggle.active ? "Cancelar defesa" : "Entrar em defesa";
-      defenseButton.disabled = !defenseToggle.interactive;
-      if (defenseToggle.interactive && typeof defenseToggle.onClick === "function") {
-        defenseButton.addEventListener("click", (event) => {
-          event.preventDefault();
-          event.stopPropagation();
-          defenseToggle.onClick();
-        });
-      }
-      wrapper.appendChild(defenseButton);
-    }
-
     return wrapper;
   }
 
@@ -2795,6 +3071,134 @@
 
     cards.forEach((card) => {
       container.appendChild(factory(card));
+    });
+  }
+
+  function buildUnitCardElementForBoard(state, renderedState, playerIndex, card) {
+    const matchStarted = Boolean(renderedState.isMatchStarted);
+    const viewingHistory = isViewingHistory(state);
+    const aiTurnActive = isAiTurnActive(state);
+    const isCurrentPlayer = playerIndex === renderedState.currentPlayerIndex;
+    const selectedUnit = getSelectedUnit(state);
+    const isSelected = matchStarted && !viewingHistory && !aiTurnActive && card.instanceId === state.selectedAttackerId;
+    const canSelect = matchStarted && !viewingHistory && !aiTurnActive && !state.winner && isCurrentPlayer && canUnitSelectForAction(state, playerIndex, card);
+    const canBeCombatTargeted = matchStarted
+      && !viewingHistory
+      && !aiTurnActive
+      && !isCurrentPlayer
+      && Boolean(selectedUnit)
+      && !selectedUnit.isDefending
+      && !state.selectedEffectCard
+      && !state.winner
+      && !isCombatTargetProtected(state, "unit", playerIndex, card.instanceId);
+    const canBeDamageEffectTargeted = matchStarted
+      && !viewingHistory
+      && !aiTurnActive
+      && !isCurrentPlayer
+      && Boolean(state.selectedEffectCard)
+      && state.selectedEffectCard.efeito === "dano_direto"
+      && !state.winner;
+    const canBeHealingEffectTargeted = matchStarted
+      && !viewingHistory
+      && !aiTurnActive
+      && isCurrentPlayer
+      && Boolean(state.selectedEffectCard)
+      && state.selectedEffectCard.efeito === "cura_direta"
+      && !state.winner
+      && card.vida < card.vidaBase;
+    const canBeDefenseTargeted = matchStarted
+      && !viewingHistory
+      && !aiTurnActive
+      && isCurrentPlayer
+      && Boolean(selectedUnit)
+      && !state.selectedEffectCard
+      && !state.winner
+      && selectedUnit.instanceId !== card.instanceId
+      && canUnitProtectTarget(state, state.currentPlayerIndex, selectedUnit, "unit", playerIndex, card.instanceId);
+
+    return createCardElement(card, {
+      interactive: canSelect || canBeCombatTargeted || canBeDamageEffectTargeted || canBeHealingEffectTargeted || canBeDefenseTargeted,
+      selected: isSelected,
+      className: (canBeCombatTargeted || canBeDamageEffectTargeted || canBeHealingEffectTargeted || canBeDefenseTargeted) ? "targetable" : "",
+      onClick: () => {
+        if (canSelect) {
+          selectAttacker(state, playerIndex, card.instanceId);
+        } else if (canBeDefenseTargeted) {
+          enterDefenseMode(state, state.currentPlayerIndex, selectedUnit.instanceId, "unit", playerIndex, card.instanceId);
+        } else if (canBeCombatTargeted) {
+          attackTarget(state, state.currentPlayerIndex, "unit", card.instanceId);
+        } else if (canBeDamageEffectTargeted) {
+          resolveEffectTarget(state, state.currentPlayerIndex, "unit", card.instanceId);
+        } else if (canBeHealingEffectTargeted) {
+          resolveEffectTarget(state, state.currentPlayerIndex, "ally-unit", card.instanceId);
+        }
+        render(state);
+      },
+      player: renderedState.players[playerIndex]
+    });
+  }
+
+  function renderBoardZone(state, renderedState, playerIndex) {
+    const player = renderedState.players[playerIndex];
+    const container = document.getElementById(`player-${player.id}-board`);
+    container.innerHTML = "";
+
+    const baseUnits = player.board.filter((unit) => !unit.isDefending);
+    if (!baseUnits.length) {
+      const empty = document.createElement("div");
+      empty.className = "empty-state";
+      empty.textContent = "Nenhuma unidade em campo.";
+      container.appendChild(empty);
+      return;
+    }
+
+    baseUnits.forEach((card) => {
+      const defenders = getDefendersForTarget(renderedState, playerIndex, "unit", card.instanceId);
+      if (!defenders.length) {
+        container.appendChild(buildUnitCardElementForBoard(state, renderedState, playerIndex, card));
+        return;
+      }
+
+      const stack = document.createElement("div");
+      stack.className = "protected-stack";
+
+      const base = document.createElement("div");
+      base.className = "protected-stack-base";
+      base.appendChild(buildUnitCardElementForBoard(state, renderedState, playerIndex, card));
+      stack.appendChild(base);
+
+      const defenderLayer = document.createElement("div");
+      defenderLayer.className = "protected-stack-defenders";
+      defenders.forEach((defender, defenderIndex) => {
+        const defenderElement = buildUnitCardElementForBoard(state, renderedState, playerIndex, defender);
+        defenderElement.classList.add("protected-defender-entry");
+        defenderElement.style.setProperty("--defense-offset", `${defenderIndex * 18}px`);
+        defenderElement.style.zIndex = String(defenderIndex + 2);
+        defenderLayer.appendChild(defenderElement);
+      });
+      stack.appendChild(defenderLayer);
+      container.appendChild(stack);
+    });
+  }
+
+  function renderHeroDefenseSlot(state, renderedState, playerIndex) {
+    const player = renderedState.players[playerIndex];
+    const slot = document.getElementById(`player-${player.id}-hero-defense-slot`);
+
+    if (!slot) {
+      return;
+    }
+
+    slot.innerHTML = "";
+    const defenders = getDefendersForTarget(renderedState, playerIndex, "player");
+    slot.hidden = defenders.length === 0;
+
+    defenders.forEach((defender, defenderIndex) => {
+      const defenderElement = buildUnitCardElementForBoard(state, renderedState, playerIndex, defender);
+      defenderElement.classList.add("hero-defense-entry");
+      defenderElement.style.setProperty("--defense-offset", `${defenderIndex * 16}px`);
+      defenderElement.style.zIndex = String(defenderIndex + 2);
+      slot.appendChild(defenderElement);
     });
   }
 
@@ -2844,6 +3248,10 @@
   function getTargetHintText(targetMode) {
     if (targetMode === "attack") {
       return "Clique para atacar jogador";
+    }
+
+    if (targetMode === "defend") {
+      return "Clique para defender jogador";
     }
 
     if (targetMode === "heal") {
@@ -3127,6 +3535,7 @@
         playerNameButton.disabled = !headerTargetMode;
         playerNameButton.classList.toggle("targetable-name", Boolean(headerTargetMode));
         playerNameButton.classList.toggle("targetable-name-attack", headerTargetMode === "attack");
+        playerNameButton.classList.toggle("targetable-name-defense", headerTargetMode === "defend");
         playerNameButton.classList.toggle("targetable-name-heal", headerTargetMode === "heal");
       }
 
@@ -3138,8 +3547,11 @@
         const hintText = getTargetHintText(headerTargetMode);
         playerTargetHint.hidden = !hintText;
         playerTargetHint.textContent = hintText;
+        playerTargetHint.classList.toggle("target-hint-defend", headerTargetMode === "defend");
         playerTargetHint.classList.toggle("target-hint-heal", headerTargetMode === "heal");
       }
+
+      renderHeroDefenseSlot(state, renderedState, index);
 
       ["unidade", "suporte", "efeito"].forEach((category) => {
         document.getElementById(`player-${player.id}-hand-${category}-count`).textContent = String(groupedHand[category].length);
@@ -3164,70 +3576,20 @@
         );
       });
 
-      renderCardList(
-        `player-${player.id}-board`,
-        player.board,
-        (card) => {
-          const isCurrentPlayer = index === renderedState.currentPlayerIndex;
-          const isSelected = matchStarted && !viewingHistory && !aiTurnActive && card.instanceId === state.selectedAttackerId;
-          const canSelect = matchStarted && !viewingHistory && !aiTurnActive && isCurrentPlayer && !state.winner && card.podeAgir && !card.jaAtacouNoTurno && !state.selectedEffectCard;
-          const canBeCombatTargeted = matchStarted && !viewingHistory && !aiTurnActive && !isCurrentPlayer && Boolean(state.selectedAttackerId) && !state.winner;
-          const canBeDamageEffectTargeted = matchStarted && !viewingHistory && !aiTurnActive && !isCurrentPlayer && Boolean(state.selectedEffectCard) && state.selectedEffectCard.efeito === "dano_direto" && !state.winner;
-          const canBeHealingEffectTargeted = matchStarted && !viewingHistory && !aiTurnActive && isCurrentPlayer
-            && Boolean(state.selectedEffectCard)
-            && state.selectedEffectCard.efeito === "cura_direta"
-            && !state.winner
-            && card.vida < card.vidaBase;
-
-          const canEnterDefense = matchStarted && !viewingHistory && !aiTurnActive && canUnitEnterDefense(state, index, card);
-          const canCancelDefense = matchStarted && !viewingHistory && !aiTurnActive && canUnitCancelDefense(state, index, card);
-
-          return createCardElement(card, {
-            interactive: canSelect || canBeCombatTargeted || canBeDamageEffectTargeted || canBeHealingEffectTargeted,
-            selected: isSelected,
-            className: (canBeCombatTargeted || canBeDamageEffectTargeted || canBeHealingEffectTargeted) ? "targetable" : "",
-            onClick: () => {
-              if (canSelect) {
-                selectAttacker(state, index, card.instanceId);
-              } else if (canBeCombatTargeted) {
-                attackTarget(state, state.currentPlayerIndex, "unit", card.instanceId);
-              } else if (canBeDamageEffectTargeted) {
-                resolveEffectTarget(state, state.currentPlayerIndex, "unit", card.instanceId);
-              } else if (canBeHealingEffectTargeted) {
-                resolveEffectTarget(state, state.currentPlayerIndex, "ally-unit", card.instanceId);
-              }
-              render(state);
-            },
-            player,
-            defenseToggle: (canEnterDefense || canCancelDefense)
-              ? {
-                interactive: true,
-                active: canCancelDefense,
-                onClick: () => {
-                  if (canCancelDefense) {
-                    cancelDefenseMode(state, index, card.instanceId);
-                  } else {
-                    enterDefenseMode(state, index, card.instanceId);
-                  }
-                  render(state);
-                }
-              }
-              : null
-          });
-        },
-        "Nenhuma unidade em campo."
-      );
+      renderBoardZone(state, renderedState, index);
 
       renderCardList(
         `player-${player.id}-support`,
         player.supportZone,
         (card) => {
           const isCurrentPlayer = index === renderedState.currentPlayerIndex;
+          const selectedUnit = getSelectedUnit(state);
           const canBeSupportTargeted = matchStarted
             && !viewingHistory
             && !aiTurnActive
             && !isCurrentPlayer
-            && Boolean(state.selectedAttackerId)
+            && Boolean(selectedUnit)
+            && !selectedUnit.isDefending
             && !state.selectedEffectCard
             && !state.winner
             && player.board.length === 0;

@@ -1,6 +1,6 @@
 # TODO
 
-- [x] Ter a opcao de colocar uma carta em modo de defesa ao inves de atacar; nesse estado, a carta toma metade do dano, fica deitada e pode ser cancelada no mesmo turno.
+- [x] Ter a opcao de colocar uma carta para defender outra unidade ou o heroi, ficando deitada, bloqueando ataques ao alvo protegido e tomando metade do dano quando for atingida.
 - [x] Unificar o log da destruicao de uma carta no campo com o dano que ela tomou.
 - [x] Criar um sistema para validar o log da partida e verificar que nao houve problemas, inclusive com validacao automatica no fim da partida.
 - [x] Criar uma area de configuracao que permita escolher:

@@ -383,6 +383,11 @@ select {
   text-shadow: 0 0 18px rgba(255, 140, 66, 0.32);
 }
 
+.player-name-button.targetable-name-defense {
+  color: #c8ffe6;
+  text-shadow: 0 0 18px rgba(127, 231, 195, 0.3);
+}
+
 .player-name-button.targetable-name-heal {
   color: #c8ffe6;
   text-shadow: 0 0 18px rgba(127, 231, 195, 0.3);
@@ -420,6 +425,21 @@ select {
 
 .player-target-hint.target-hint-heal {
   color: var(--support);
+}
+
+.player-target-hint.target-hint-defend {
+  color: var(--support);
+}
+
+.hero-defense-slot {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-height: 0;
+}
+
+.hero-defense-slot[hidden] {
+  display: none !important;
 }
 
 .stat {
@@ -967,32 +987,42 @@ select {
   max-width: 168px;
 }
 
-.card-defense-toggle {
-  position: absolute;
-  top: 10px;
-  right: 10px;
+.protected-stack {
+  position: relative;
+  flex: 0 1 168px;
+  width: min(100%, 168px);
+  max-width: 168px;
+  min-height: 252px;
+}
+
+.protected-stack-base {
+  position: relative;
   z-index: 2;
-  min-width: 42px;
-  padding: 6px 8px;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 999px;
-  background: rgba(8, 18, 21, 0.82);
-  color: var(--text);
-  cursor: pointer;
-  font-size: 0.7rem;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
 }
 
-.card-defense-toggle.is-active {
-  border-color: rgba(143, 244, 209, 0.4);
-  background: rgba(70, 201, 162, 0.22);
+.protected-stack-base:hover {
+  z-index: 12;
 }
 
-.card-defense-toggle:disabled {
-  opacity: 0.52;
-  cursor: not-allowed;
+.protected-stack-defenders {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.protected-defender-entry,
+.hero-defense-entry {
+  position: absolute;
+  top: calc(var(--defense-offset, 0px) * 0.35);
+  left: calc(var(--defense-offset, 0px) * 0.45);
+  pointer-events: auto;
+}
+
+.hero-defense-slot .hero-defense-entry {
+  position: relative;
+  top: auto;
+  left: auto;
+  margin-left: calc(var(--defense-offset, 0px) * -0.45);
 }
 
 .card-entry.is-defending {
@@ -1016,6 +1046,21 @@ select {
 
 .card.defending.disabled {
   opacity: 1;
+}
+
+.hero-defense-slot .card-entry {
+  flex: 0 1 134px;
+  width: min(100%, 134px);
+  max-width: 134px;
+}
+
+.hero-defense-slot .card-entry.is-defending {
+  min-height: 186px;
+}
+
+.hero-defense-slot .card-entry.is-defending .card {
+  width: 176px;
+  transform: translate(-50%, -50%) rotate(90deg) scale(0.64);
 }
 
 .typed-hand .card {

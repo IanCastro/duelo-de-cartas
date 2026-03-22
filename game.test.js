@@ -49,6 +49,7 @@ function snapshotStateForValidation(state) {
     selectedEffectCard: state.selectedEffectCard,
     winnerPlayerId: state.winner ? state.winner.id : null,
     turnNumber: state.turnNumber,
+    nextDefenseOrder: state.nextDefenseOrder,
     players: state.players
   }));
 }
@@ -404,9 +405,28 @@ test("keyboard shortcut a attacks the rival player with the selected unit", () =
 
 test("player header target mode exposes attack and heal player targets", () => {
   const attackState = createStartedState();
-  attackState.selectedAttackerId = "atk";
+  attackState.players[0].board = [{
+    id: "atk",
+    instanceId: "atk",
+    nome: "Atacante",
+    categoria: "unidade",
+    custo: 1,
+    ataque: 2,
+    vida: 3,
+    vidaBase: 3,
+    descricao: "",
+    estado: "campo",
+    podeAgir: true,
+    jaAtacouNoTurno: false,
+    isDefending: false,
+    defendingTargetType: null,
+    defendingTargetPlayerIndex: null,
+    defendingTargetInstanceId: null,
+    defenseOrder: null
+  }];
+  game.selectAttacker(attackState, 0, "atk");
 
-  assert(game.getPlayerHeaderTargetMode(attackState, 0) === null, "own header should not be attackable");
+  assert(game.getPlayerHeaderTargetMode(attackState, 0) === "defend", "own header should become a defense target when a ready allied unit is selected");
   assert(game.getPlayerHeaderTargetMode(attackState, 1) === "attack", "enemy header should become an attack target");
 
   const healState = createStartedState();
@@ -1013,7 +1033,7 @@ test("end turn refreshes next player's units for combat", () => {
   assert(state.players[1].board[0].jaAtacouNoTurno === false, "next player's unit attack should refresh");
 });
 
-test("unit can enter and cancel defense in the same turn", () => {
+test("unit can defend an allied unit and cancel by clicking itself", () => {
   const state = createStartedState();
   state.players[0].board = [{
     id: "guard",
@@ -1029,23 +1049,149 @@ test("unit can enter and cancel defense in the same turn", () => {
     podeAgir: true,
     jaAtacouNoTurno: false,
     isDefending: false,
-    defenseTurnNumber: null
+    defendingTargetType: null,
+    defendingTargetPlayerIndex: null,
+    defendingTargetInstanceId: null,
+    defenseOrder: null
+  }, {
+    id: "ally",
+    instanceId: "ally",
+    nome: "Aliada",
+    categoria: "unidade",
+    custo: 2,
+    ataque: 2,
+    vida: 5,
+    vidaBase: 5,
+    descricao: "",
+    estado: "campo",
+    podeAgir: true,
+    jaAtacouNoTurno: false,
+    isDefending: false,
+    defendingTargetType: null,
+    defendingTargetPlayerIndex: null,
+    defendingTargetInstanceId: null,
+    defenseOrder: null
   }];
 
-  const entered = game.enterDefenseMode(state, 0, "guard");
+  game.selectAttacker(state, 0, "guard");
+  const entered = game.enterDefenseMode(state, 0, "guard", "unit", 0, "ally");
 
-  assert(entered === true, "defense should be available for a ready allied unit");
+  assert(entered === true, "defense should be available for a selected ready allied unit");
   assert(state.players[0].board[0].isDefending === true, "unit should enter defense mode");
+  assert(state.players[0].board[0].defendingTargetType === "unit", "defense should record that the protected target is a unit");
+  assert(state.players[0].board[0].defendingTargetInstanceId === "ally", "defense should remember the allied target");
   assert(state.players[0].board[0].jaAtacouNoTurno === true, "defense should spend the action for the turn");
 
-  const canceled = game.cancelDefenseMode(state, 0, "guard");
+  const selected = game.selectAttacker(state, 0, "guard");
+  const canceled = game.selectAttacker(state, 0, "guard");
 
+  assert(selected === true, "defending unit should still be selectable on its owner's turn");
   assert(canceled === true, "defense should be cancelable on the same turn");
   assert(state.players[0].board[0].isDefending === false, "unit should leave defense mode after canceling");
   assert(state.players[0].board[0].jaAtacouNoTurno === false, "canceling defense should restore the action");
 });
 
-test("defense halves incoming combat damage rounding up", () => {
+test("selected unit can defend the own hero through the header target", () => {
+  const state = createStartedState();
+  state.players[0].board = [{
+    id: "guard",
+    instanceId: "guard",
+    nome: "Guardiao",
+    categoria: "unidade",
+    custo: 4,
+    ataque: 2,
+    vida: 8,
+    vidaBase: 8,
+    descricao: "",
+    estado: "campo",
+    podeAgir: true,
+    jaAtacouNoTurno: false,
+    isDefending: false,
+    defendingTargetType: null,
+    defendingTargetPlayerIndex: null,
+    defendingTargetInstanceId: null,
+    defenseOrder: null
+  }];
+
+  game.selectAttacker(state, 0, "guard");
+  const defended = game.resolvePlayerHeaderTarget(state, 0);
+
+  assert(defended === true, "clicking the own hero header should assign defense when a unit is selected");
+  assert(state.players[0].board[0].isDefending === true, "unit should enter defense mode for the hero");
+  assert(state.players[0].board[0].defendingTargetType === "player", "hero defense should record the player target");
+  assert(state.players[0].board[0].defendingTargetPlayerIndex === 0, "hero defense should point at the owner's hero");
+});
+
+test("protected units cannot be attacked directly while the defender remains attackable", () => {
+  const state = createStartedState();
+  state.players[0].board = [{
+    id: "attacker",
+    instanceId: "attacker",
+    nome: "Atacante",
+    categoria: "unidade",
+    custo: 3,
+    ataque: 3,
+    vida: 3,
+    vidaBase: 3,
+    descricao: "",
+    estado: "campo",
+    podeAgir: true,
+    jaAtacouNoTurno: false
+  }];
+  state.players[1].board = [{
+    id: "guard",
+    instanceId: "guard",
+    nome: "Guardiao",
+    categoria: "unidade",
+    custo: 4,
+    ataque: 2,
+    vida: 8,
+    vidaBase: 8,
+    descricao: "",
+    estado: "campo",
+    podeAgir: true,
+    jaAtacouNoTurno: false,
+    isDefending: false,
+    defendingTargetType: null,
+    defendingTargetPlayerIndex: null,
+    defendingTargetInstanceId: null,
+    defenseOrder: null
+  }, {
+    id: "ally",
+    instanceId: "ally",
+    nome: "Aliada",
+    categoria: "unidade",
+    custo: 2,
+    ataque: 2,
+    vida: 5,
+    vidaBase: 5,
+    descricao: "",
+    estado: "campo",
+    podeAgir: true,
+    jaAtacouNoTurno: false,
+    isDefending: false,
+    defendingTargetType: null,
+    defendingTargetPlayerIndex: null,
+    defendingTargetInstanceId: null,
+    defenseOrder: null
+  }];
+
+  state.currentPlayerIndex = 1;
+  game.enterDefenseMode(state, 1, "guard", "unit", 1, "ally");
+  state.currentPlayerIndex = 0;
+
+  game.selectAttacker(state, 0, "attacker");
+  const blocked = game.attackTarget(state, 0, "unit", "ally");
+
+  assert(blocked === false, "protected allied unit should not be attackable directly");
+  assert(state.players[1].board[1].vida === 5, "protected unit should keep full life after the blocked attack");
+
+  const attackedDefender = game.attackTarget(state, 0, "unit", "guard");
+
+  assert(attackedDefender === true, "the defender itself should stay attackable");
+});
+
+test("defense halves incoming combat damage rounding up on the defending unit itself", () => {
   const state = createStartedState();
   state.players[0].board = [{
     id: "atk",
@@ -1075,7 +1221,10 @@ test("defense halves incoming combat damage rounding up", () => {
     podeAgir: true,
     jaAtacouNoTurno: true,
     isDefending: true,
-    defenseTurnNumber: state.turnNumber
+    defendingTargetType: "player",
+    defendingTargetPlayerIndex: 1,
+    defendingTargetInstanceId: null,
+    defenseOrder: 1
   }];
 
   game.selectAttacker(state, 0, "atk");
@@ -1085,7 +1234,7 @@ test("defense halves incoming combat damage rounding up", () => {
   assert(state.players[1].board[0].vida === 2, "3 damage should become 2 against defense");
 });
 
-test("defense also halves direct damage and expires on the owner's next turn", () => {
+test("defense also halves direct damage and no longer expires automatically", () => {
   const state = createStartedState();
   state.players[0].manaAtual = 2;
   state.players[0].manaMax = 2;
@@ -1113,7 +1262,10 @@ test("defense also halves direct damage and expires on the owner's next turn", (
     podeAgir: true,
     jaAtacouNoTurno: true,
     isDefending: true,
-    defenseTurnNumber: state.turnNumber
+    defendingTargetType: "player",
+    defendingTargetPlayerIndex: 1,
+    defendingTargetInstanceId: null,
+    defenseOrder: 1
   }];
 
   game.playCard(state, 0, "effect-1");
@@ -1125,7 +1277,158 @@ test("defense also halves direct damage and expires on the owner's next turn", (
   game.endTurn(state);
   game.endTurn(state);
 
-  assert(state.players[1].board[0].isDefending === false, "defense should expire at the start of the owner's next turn");
+  assert(state.players[1].board[0].isDefending === true, "defense should persist across turns while the defender stays in play");
+});
+
+test("defending units can retarget on later turns and cannot attack until they cancel", () => {
+  const state = createStartedState();
+  state.players[0].board = [{
+    id: "guard",
+    instanceId: "guard",
+    nome: "Guardiao",
+    categoria: "unidade",
+    custo: 4,
+    ataque: 2,
+    vida: 8,
+    vidaBase: 8,
+    descricao: "",
+    estado: "campo",
+    podeAgir: true,
+    jaAtacouNoTurno: false,
+    isDefending: false,
+    defendingTargetType: null,
+    defendingTargetPlayerIndex: null,
+    defendingTargetInstanceId: null,
+    defenseOrder: null
+  }, {
+    id: "ally-a",
+    instanceId: "ally-a",
+    nome: "Aliada A",
+    categoria: "unidade",
+    custo: 2,
+    ataque: 2,
+    vida: 5,
+    vidaBase: 5,
+    descricao: "",
+    estado: "campo",
+    podeAgir: true,
+    jaAtacouNoTurno: false,
+    isDefending: false,
+    defendingTargetType: null,
+    defendingTargetPlayerIndex: null,
+    defendingTargetInstanceId: null,
+    defenseOrder: null
+  }, {
+    id: "ally-b",
+    instanceId: "ally-b",
+    nome: "Aliada B",
+    categoria: "unidade",
+    custo: 3,
+    ataque: 3,
+    vida: 4,
+    vidaBase: 4,
+    descricao: "",
+    estado: "campo",
+    podeAgir: true,
+    jaAtacouNoTurno: false,
+    isDefending: false,
+    defendingTargetType: null,
+    defendingTargetPlayerIndex: null,
+    defendingTargetInstanceId: null,
+    defenseOrder: null
+  }];
+
+  game.enterDefenseMode(state, 0, "guard", "unit", 0, "ally-a");
+  game.endTurn(state);
+  game.endTurn(state);
+
+  const selected = game.selectAttacker(state, 0, "guard");
+  const shortcutAttack = game.handleShortcutAction(state, "a");
+  const retargeted = game.enterDefenseMode(state, 0, "guard", "unit", 0, "ally-b");
+
+  assert(selected === true, "defending unit should stay selectable on later turns");
+  assert(shortcutAttack === false, "defending unit should not be able to attack while it keeps protecting someone");
+  assert(retargeted === true, "defending unit should be able to retarget the protected ally on later turns");
+  assert(state.players[0].board[0].defendingTargetInstanceId === "ally-b", "retargeting should update the protected ally");
+});
+
+test("supports cannot become defense targets and multiple defenders can stack on one ally", () => {
+  const state = createStartedState();
+  state.players[0].board = [{
+    id: "guard-a",
+    instanceId: "guard-a",
+    nome: "Guardiao A",
+    categoria: "unidade",
+    custo: 4,
+    ataque: 2,
+    vida: 8,
+    vidaBase: 8,
+    descricao: "",
+    estado: "campo",
+    podeAgir: true,
+    jaAtacouNoTurno: false,
+    isDefending: false,
+    defendingTargetType: null,
+    defendingTargetPlayerIndex: null,
+    defendingTargetInstanceId: null,
+    defenseOrder: null
+  }, {
+    id: "guard-b",
+    instanceId: "guard-b",
+    nome: "Guardiao B",
+    categoria: "unidade",
+    custo: 4,
+    ataque: 2,
+    vida: 8,
+    vidaBase: 8,
+    descricao: "",
+    estado: "campo",
+    podeAgir: true,
+    jaAtacouNoTurno: false,
+    isDefending: false,
+    defendingTargetType: null,
+    defendingTargetPlayerIndex: null,
+    defendingTargetInstanceId: null,
+    defenseOrder: null
+  }, {
+    id: "ally",
+    instanceId: "ally",
+    nome: "Aliada",
+    categoria: "unidade",
+    custo: 2,
+    ataque: 2,
+    vida: 5,
+    vidaBase: 5,
+    descricao: "",
+    estado: "campo",
+    podeAgir: true,
+    jaAtacouNoTurno: false,
+    isDefending: false,
+    defendingTargetType: null,
+    defendingTargetPlayerIndex: null,
+    defendingTargetInstanceId: null,
+    defenseOrder: null
+  }];
+  state.players[0].supportZone = [{
+    id: "support-1",
+    instanceId: "support-a",
+    nome: "Estandarte de Guerra",
+    categoria: "suporte",
+    custo: 5,
+    efeito: "aura_ataque",
+    valor: 1,
+    descricao: "",
+    estado: "suporte"
+  }];
+
+  const invalidSupportTarget = game.enterDefenseMode(state, 0, "guard-a", "support", 0, "support-a");
+  const firstDefense = game.enterDefenseMode(state, 0, "guard-a", "unit", 0, "ally");
+  const secondDefense = game.enterDefenseMode(state, 0, "guard-b", "unit", 0, "ally");
+
+  assert(invalidSupportTarget === false, "supports should not be valid defense targets");
+  assert(firstDefense === true && secondDefense === true, "multiple defenders should be able to stack on the same allied unit");
+  assert(state.players[0].board[0].defendingTargetInstanceId === "ally", "first defender should protect the chosen ally");
+  assert(state.players[0].board[1].defendingTargetInstanceId === "ally", "second defender should protect the same ally");
 });
 
 test("attack against a unit deals damage and discards it if defeated", () => {
@@ -1444,6 +1747,8 @@ test("layout markup removes the cancel button and keeps a pending effect slot", 
   assert(html.includes("id=\"player-1-deck-stat\""), "player panels should expose per-player deck stats");
   assert(html.includes("id=\"player-1-controller-chip\""), "player headers should expose the controller chip for player 1");
   assert(html.includes("id=\"player-2-controller-chip\""), "player headers should expose the controller chip for player 2");
+  assert(html.includes("id=\"player-1-hero-defense-slot\""), "player 1 header should expose a hero defense slot");
+  assert(html.includes("id=\"player-2-hero-defense-slot\""), "player 2 header should expose a hero defense slot");
   assert(!html.includes("<p class=\"player-label\">Jogador 1</p>"), "player 1 header should no longer render the Jogador 1 label");
   assert(!html.includes("<p class=\"player-label\">Jogador 2</p>"), "player 2 header should no longer render the Jogador 2 label");
   assert(!html.includes("id=\"match-config-summary\""), "the pre-game panel should no longer keep a collapsed summary during the match");
@@ -1454,9 +1759,12 @@ test("layout markup removes the cancel button and keeps a pending effect slot", 
   assert(html.includes("so comeca quando voce clicar em Start"), "rules should describe the pre-game Start flow");
   assert(html.includes("configuracao fica travada"), "rules should explain that Humano/IA choices lock after Start");
   assert(html.includes("default e Separado"), "rules should describe the default separate deck mode");
-  assert(html.includes("carta fica deitada"), "rules should describe the defense stance visuals");
+  assert(html.includes("fica deitada"), "rules should describe the defense stance visuals");
+  assert(html.includes("clique em outra unidade aliada ou no proprio heroi"), "rules should describe the new click-to-defend flow");
+  assert(!html.includes("botao de escudo"), "rules should no longer mention the removed defense button");
   assert(html.includes("IA vs IA"), "rules should describe how to configure ai vs ai");
   assert(html.includes("Validar log"), "rules should mention the manual log validation flow");
+  assert(!fs.readFileSync(path.join(process.cwd(), "styles.css"), "utf8").includes(".card-defense-toggle"), "styles should no longer keep the removed defense toggle button");
 });
 
 test("estandarte de guerra now costs 5 mana", () => {
@@ -1990,6 +2298,61 @@ test("log validator passes on histories produced during ai turns", () => {
   assert(result.validatedEntryCount === state.log.length, "ai-generated histories should validate every line");
 });
 
+test("log validator passes after assigning and canceling a persistent defense target", () => {
+  const state = createStartedState();
+  const guard = state.players[0].hand.shift();
+  const ally = state.players[0].hand.shift();
+  Object.assign(guard, {
+    id: "guard",
+    instanceId: "guard",
+    nome: "Guardiao",
+    categoria: "unidade",
+    custo: 4,
+    ataque: 2,
+    vida: 8,
+    vidaBase: 8,
+    descricao: "",
+    estado: "campo",
+    podeAgir: true,
+    jaAtacouNoTurno: false,
+    isDefending: false,
+    defendingTargetType: null,
+    defendingTargetPlayerIndex: null,
+    defendingTargetInstanceId: null,
+    defenseOrder: null
+  });
+  Object.assign(ally, {
+    id: "ally",
+    instanceId: "ally",
+    nome: "Aliada",
+    categoria: "unidade",
+    custo: 2,
+    ataque: 2,
+    vida: 5,
+    vidaBase: 5,
+    descricao: "",
+    estado: "campo",
+    podeAgir: true,
+    jaAtacouNoTurno: false,
+    isDefending: false,
+    defendingTargetType: null,
+    defendingTargetPlayerIndex: null,
+    defendingTargetInstanceId: null,
+    defenseOrder: null
+  });
+  state.players[0].board = [guard, ally];
+  state.log[0].snapshot = snapshotStateForValidation(state);
+
+  game.enterDefenseMode(state, 0, "guard", "unit", 0, "ally");
+  game.selectAttacker(state, 0, "guard");
+  game.selectAttacker(state, 0, "guard");
+
+  const result = game.validateMatchLog(state.log);
+
+  assert(result.status === game.LOG_VALIDATION_STATUS.VALID, "defense assignment and cancelation should keep the log replay valid");
+  assert(result.validatedEntryCount === state.log.length, "defense logs should validate every line");
+});
+
 test("log validator reports tampered snapshots", () => {
   const state = createStartedState();
   state.players[0].manaAtual = 2;
@@ -2159,7 +2522,7 @@ test("rewind to a lethal attack entry should preserve the winner state", () => {
   });
 
   const attackerInstanceId = state.players[0].hand[0].instanceId;
-  state.log[0].snapshot.players[1].vida = 2;
+  state.log[0].snapshot = snapshotStateForValidation(state);
 
   game.playCard(state, 0, attackerInstanceId);
   game.selectAttacker(state, 0, attackerInstanceId);
@@ -2189,7 +2552,7 @@ test("lethal player attack logs a single final line with the winner embedded", (
   });
 
   const attackerInstanceId = state.players[0].hand[0].instanceId;
-  state.log[0].snapshot.players[1].vida = 2;
+  state.log[0].snapshot = snapshotStateForValidation(state);
 
   game.playCard(state, 0, attackerInstanceId);
   game.selectAttacker(state, 0, attackerInstanceId);
@@ -2221,7 +2584,7 @@ test("lethal direct damage logs a single final line with the winner embedded", (
   });
 
   const effectInstanceId = state.players[0].hand[0].instanceId;
-  state.log[0].snapshot.players[1].vida = 3;
+  state.log[0].snapshot = snapshotStateForValidation(state);
 
   game.playCard(state, 0, effectInstanceId);
   game.resolveEffectTarget(state, 0, "player");
