@@ -262,9 +262,13 @@
             <span id="winner-banner">Sem vencedor</span>
           </div>
           <div class="log-validation-toolbar">
-            <button id="validate-log-button" class="action-button secondary" type="button">Validar log</button>
+            <div class="log-validation-toolbar-actions">
+              <button id="validate-log-button" class="action-button secondary" type="button">Validar log</button>
+              <button id="copy-validation-issue-button" class="action-button secondary" type="button" hidden>Copiar erro detalhado</button>
+            </div>
             <span id="log-validation-status" class="log-validation-chip">Nao validado</span>
           </div>
+          <div id="log-validation-copy-feedback" class="log-validation-copy-feedback" hidden aria-live="polite"></div>
           <div id="game-log"></div>
           <div id="log-validation-results" class="log-validation-results" hidden aria-live="polite"></div>
         </section>

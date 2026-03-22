@@ -1753,6 +1753,7 @@ test("layout markup removes the cancel button and keeps a pending effect slot", 
   assert(!html.includes("<p class=\"player-label\">Jogador 2</p>"), "player 2 header should no longer render the Jogador 2 label");
   assert(!html.includes("id=\"match-config-summary\""), "the pre-game panel should no longer keep a collapsed summary during the match");
   assert(html.includes("id=\"validate-log-button\""), "the log panel should expose a manual validation button");
+  assert(html.includes("id=\"copy-validation-issue-button\""), "the log panel should expose a button to copy detailed validation errors");
   assert(html.includes("id=\"log-validation-status\""), "the log panel should expose a validation status chip");
   assert(html.includes("compact-action-button"), "turn action buttons should use the compact button style");
   assert(html.includes("pressione Esc para voltar ao presente"), "rules should describe how to leave history view without dedicated buttons");
@@ -2214,6 +2215,7 @@ test("log validator passes after healing an allied unit with repair", () => {
     id: "ally",
     nome: "Aliada",
     categoria: "unidade",
+    efeito: null,
     custo: 2,
     ataque: 2,
     vida: 2,
@@ -2223,7 +2225,10 @@ test("log validator passes after healing an allied unit with repair", () => {
     podeAgir: true,
     jaAtacouNoTurno: false,
     isDefending: false,
-    defenseTurnNumber: null
+    defendingTargetType: null,
+    defendingTargetPlayerIndex: null,
+    defendingTargetInstanceId: null,
+    defenseOrder: null
   });
   state.players[0].board = [unitCard];
   state.log[0].snapshot = snapshotStateForValidation(state);
@@ -2234,6 +2239,62 @@ test("log validator passes after healing an allied unit with repair", () => {
   const result = game.validateMatchLog(state.log);
 
   assert(result.status === game.LOG_VALIDATION_STATUS.VALID, "repairing an allied unit should keep the log replay valid");
+});
+
+test("log validator replays multi-turn unit healing without drifting the active player", () => {
+  const state = createStartedState();
+  state.players[0].manaAtual = 1;
+  state.players[0].manaMax = 1;
+
+  const healCard = state.players[0].hand[0];
+  Object.assign(healCard, {
+    id: "repair-long",
+    nome: "Reparo Longo",
+    categoria: "efeito",
+    imagem: "assets/cards/effect-2.png",
+    custo: 1,
+    efeito: "cura_direta",
+    valor: 6,
+    descricao: ""
+  });
+
+  const boardUnit = state.players[0].hand.splice(1, 1)[0];
+  Object.assign(boardUnit, {
+    id: "ally-long",
+    instanceId: "ally-long",
+    nome: "Aliada Ferida",
+    categoria: "unidade",
+    imagem: "assets/cards/unit-1.png",
+    efeito: null,
+    custo: 2,
+    ataque: 2,
+    vida: 1,
+    vidaBase: 5,
+    descricao: "",
+    estado: "campo",
+    podeAgir: true,
+    jaAtacouNoTurno: false,
+    isDefending: false,
+    defendingTargetType: null,
+    defendingTargetPlayerIndex: null,
+    defendingTargetInstanceId: null,
+    defenseOrder: null
+  });
+  state.players[0].board = [boardUnit];
+  state.log[0].snapshot = snapshotStateForValidation(state);
+
+  game.drawTurnCard(state, 0);
+  game.endTurn(state);
+  game.endTurn(state);
+  game.drawTurnCard(state, 0);
+  game.playCard(state, 0, healCard.instanceId);
+  game.resolveEffectTarget(state, 0, "ally-unit", boardUnit.instanceId);
+
+  const result = game.validateMatchLog(state.log);
+
+  assert(result.status === game.LOG_VALIDATION_STATUS.VALID, "multi-turn unit healing histories should validate successfully");
+  assert(!result.issues.some((issue) => issue.code === "invalid-heal-unit-player"), "the validator should no longer drift into invalid-heal-unit-player on later heal lines");
+  assert(result.validatedEntryCount === state.log.length, "the regression history should validate every logged action");
 });
 
 test("log validator passes after direct damage resolves on an enemy unit", () => {
@@ -2256,6 +2317,7 @@ test("log validator passes after direct damage resolves on an enemy unit", () =>
     id: "enemy",
     nome: "Inimiga",
     categoria: "unidade",
+    efeito: null,
     custo: 2,
     ataque: 2,
     vida: 5,
@@ -2265,7 +2327,10 @@ test("log validator passes after direct damage resolves on an enemy unit", () =>
     podeAgir: true,
     jaAtacouNoTurno: false,
     isDefending: false,
-    defenseTurnNumber: null
+    defendingTargetType: null,
+    defendingTargetPlayerIndex: null,
+    defendingTargetInstanceId: null,
+    defenseOrder: null
   });
   state.players[1].board = [enemyUnit];
   state.log[0].snapshot = snapshotStateForValidation(state);
@@ -2366,6 +2431,187 @@ test("log validator reports tampered snapshots", () => {
   assert(result.issues.some((issue) => issue.numero === 2), "the validator should point to the broken line");
 });
 
+test("replay validation issues include detailed technical context", () => {
+  const state = createStartedState();
+  state.players[1].vida = 2;
+  state.players[0].manaAtual = 1;
+  state.players[0].manaMax = 1;
+  Object.assign(state.players[0].hand[0], {
+    id: "atk",
+    nome: "Finalizador",
+    categoria: "unidade",
+    efeito: null,
+    custo: 1,
+    ataque: 4,
+    vida: 3,
+    vidaBase: 3,
+    descricao: ""
+  });
+
+  const attackerInstanceId = state.players[0].hand[0].instanceId;
+  state.log[0].snapshot = snapshotStateForValidation(state);
+  game.playCard(state, 0, attackerInstanceId);
+  state.log[state.log.length - 1].snapshot.players[0].board = [];
+  game.selectAttacker(state, 0, attackerInstanceId);
+  game.attackTarget(state, 0, "player");
+
+  const result = game.validateMatchLog(state.log);
+  const replayIssue = result.issues.find((issue) => issue.details && issue.details.eventKind);
+
+  assert(result.status === game.LOG_VALIDATION_STATUS.INVALID, "the tampered replay should still fail validation");
+  assert(Boolean(replayIssue), "replay failures should surface a detailed issue payload");
+  assert(typeof replayIssue.details.silentTransitionsTried === "number", "detailed replay issues should record how many silent transitions were tried");
+  assert(replayIssue.details.previousEntry && replayIssue.details.previousEntry.numero >= 1, "detailed replay issues should describe the previous log entry");
+  assert(replayIssue.details.lastApplyError && typeof replayIssue.details.lastApplyError.code === "string", "detailed replay issues should preserve the last apply error");
+});
+
+test("detailed error export is only available for invalid validation results and follows the focused issue", () => {
+  const state = game.createInitialState();
+  const snapshotSource = createStartedState();
+  const snapshot = snapshotStateForValidation(snapshotSource);
+
+  assert(game.canCopyFocusedLogValidationIssue(state) === false, "copying should stay unavailable before any invalid validation result exists");
+
+  state.log = [
+    {
+      id: 1,
+      numero: 1,
+      texto: "Partida iniciada.",
+      event: { kind: game.LOG_EVENT_TYPES.MATCH_START },
+      snapshot
+    },
+    {
+      id: 2,
+      numero: 2,
+      texto: "Erro A.",
+      event: { kind: game.LOG_EVENT_TYPES.DRAW_CARD },
+      snapshot
+    },
+    {
+      id: 3,
+      numero: 3,
+      texto: "Erro B.",
+      event: { kind: game.LOG_EVENT_TYPES.PLAY_UNIT },
+      snapshot
+    }
+  ];
+  state.logValidationStatus = game.LOG_VALIDATION_STATUS.INVALID;
+  state.validatedEntryCount = 2;
+  state.logValidationIssues = [
+    {
+      entryId: 2,
+      numero: 2,
+      code: "first-error",
+      message: "Primeiro problema.",
+      details: { eventKind: game.LOG_EVENT_TYPES.DRAW_CARD }
+    },
+    {
+      entryId: 3,
+      numero: 3,
+      code: "second-error",
+      message: "Segundo problema.",
+      details: { eventKind: game.LOG_EVENT_TYPES.PLAY_UNIT }
+    }
+  ];
+
+  assert(game.canCopyFocusedLogValidationIssue(state) === true, "copying should become available when invalid issues exist");
+
+  game.selectLogValidationIssue(state, 1);
+  const payload = game.buildLogValidationExportPayload(state);
+
+  assert(payload.validationSummary.status === game.LOG_VALIDATION_STATUS.INVALID, "the exported payload should include the invalid validation summary");
+  assert(payload.validationSummary.issueCount === 2, "the exported payload should include the issue count");
+  assert(payload.focusedIssue.code === "second-error", "the exported payload should follow the focused issue");
+  assert(payload.focusedIssue.details.eventKind === game.LOG_EVENT_TYPES.PLAY_UNIT, "the focused issue should keep its technical details");
+  assert(payload.focusedEntry.id === 3, "the exported payload should include the focused log entry");
+  assert(payload.previousEntry.id === 2, "the exported payload should include the previous entry around the focused issue");
+  assert(payload.focusedSnapshot.players.length === 2, "the exported payload should include the full focused snapshot");
+});
+
+test("copying the focused validation issue falls back when navigator.clipboard is unavailable", () => {
+  const state = game.createInitialState();
+  const snapshotSource = createStartedState();
+  const snapshot = snapshotStateForValidation(snapshotSource);
+  state.log = [
+    {
+      id: 1,
+      numero: 1,
+      texto: "Partida iniciada.",
+      event: { kind: game.LOG_EVENT_TYPES.MATCH_START },
+      snapshot
+    },
+    {
+      id: 2,
+      numero: 2,
+      texto: "Erro exportavel.",
+      event: { kind: game.LOG_EVENT_TYPES.EFFECT_HEAL_UNIT },
+      snapshot
+    }
+  ];
+  state.logValidationStatus = game.LOG_VALIDATION_STATUS.INVALID;
+  state.validatedEntryCount = 1;
+  state.logValidationIssues = [
+    {
+      entryId: 2,
+      numero: 2,
+      code: "invalid-heal-unit-player",
+      message: "O replay nao conseguiu resolver a cura na unidade.",
+      details: {
+        eventKind: game.LOG_EVENT_TYPES.EFFECT_HEAL_UNIT,
+        replayCurrentPlayerIndex: 1,
+        eventPlayerIndex: 0
+      }
+    }
+  ];
+  state.selectedValidationIssueIndex = 0;
+
+  let copiedText = "";
+  let selected = false;
+  let removed = false;
+  let textareaRef = null;
+  const fakeDocument = {
+    createElement(tagName) {
+      assert(tagName === "textarea", "fallback copy should create a textarea");
+      textareaRef = {
+        value: "",
+        style: {},
+        setAttribute() {},
+        select() {
+          selected = true;
+        }
+      };
+      return textareaRef;
+    },
+    body: {
+      appendChild(node) {
+        textareaRef = node;
+      },
+      removeChild(node) {
+        removed = node === textareaRef;
+      }
+    },
+    execCommand(command) {
+      if (command === "copy") {
+        copiedText = textareaRef.value;
+        return true;
+      }
+      return false;
+    }
+  };
+
+  const copied = game.copyFocusedLogValidationIssue(state, {
+    navigator: {},
+    document: fakeDocument
+  });
+
+  assert(copied === true, "fallback copy should report success");
+  assert(selected === true, "fallback copy should select the temporary textarea content");
+  assert(removed === true, "fallback copy should clean up the temporary textarea");
+  assert(copiedText.includes("\"focusedIssue\""), "fallback copy should serialize the focused issue as JSON");
+  assert(copiedText.includes("\"invalid-heal-unit-player\""), "fallback copy should include the issue code in the exported JSON");
+  assert(state.logValidationCopyFeedbackStatus === "success", "successful copy should expose a success feedback state");
+});
+
 test("new log entries reset the validation status to idle", () => {
   const state = createStartedState();
   let result = game.validateMatchLog(state.log);
@@ -2438,6 +2684,7 @@ test("rewind to a resolved effect entry should restore a stable post-effect stat
     id: "ally",
     nome: "Aliada",
     categoria: "unidade",
+    efeito: null,
     custo: 2,
     ataque: 2,
     vida: 2,
@@ -2447,7 +2694,10 @@ test("rewind to a resolved effect entry should restore a stable post-effect stat
     podeAgir: true,
     jaAtacouNoTurno: false,
     isDefending: false,
-    defenseTurnNumber: null
+    defendingTargetType: null,
+    defendingTargetPlayerIndex: null,
+    defendingTargetInstanceId: null,
+    defenseOrder: null
   });
   state.players[0].board = [unitCard];
   state.log[0].snapshot = snapshotStateForValidation(state);

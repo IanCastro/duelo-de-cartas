@@ -262,6 +262,9 @@
       logValidationStatus: LOG_VALIDATION_STATUS.IDLE,
       validatedEntryCount: 0,
       logValidationIssues: [],
+      selectedValidationIssueIndex: null,
+      logValidationCopyFeedback: null,
+      logValidationCopyFeedbackStatus: null,
       players: [
         createPlayer(1, "Sentinela Azul"),
         createPlayer(2, "Guardiao Rubro")
@@ -338,12 +341,20 @@
     state.logValidationStatus = result.status;
     state.validatedEntryCount = result.validatedEntryCount;
     state.logValidationIssues = result.issues;
+    state.selectedValidationIssueIndex = null;
+    state.logValidationCopyFeedback = null;
+    state.logValidationCopyFeedbackStatus = null;
   }
 
   function applyLogValidationResult(state, result) {
     state.logValidationStatus = result.status;
     state.validatedEntryCount = result.validatedEntryCount;
     state.logValidationIssues = result.issues;
+    state.selectedValidationIssueIndex = result.status === LOG_VALIDATION_STATUS.INVALID && result.issues.length
+      ? 0
+      : null;
+    state.logValidationCopyFeedback = null;
+    state.logValidationCopyFeedbackStatus = null;
     return result;
   }
 
@@ -529,6 +540,9 @@
       logValidationStatus: LOG_VALIDATION_STATUS.IDLE,
       validatedEntryCount: 0,
       logValidationIssues: [],
+      selectedValidationIssueIndex: null,
+      logValidationCopyFeedback: null,
+      logValidationCopyFeedbackStatus: null,
       players: cloneData(snapshot.players)
     };
 
@@ -551,13 +565,216 @@
     return restoreStateFromSnapshot(snapshot, []);
   }
 
-  function createValidationIssue(entry, code, message) {
+  function createValidationIssue(entry, code, message, details = null) {
     return {
       entryId: entry?.id ?? null,
       numero: entry?.numero ?? null,
       code,
-      message
+      message,
+      details: details == null ? null : cloneData(details)
     };
+  }
+
+  function createValidationEntrySummary(entry) {
+    if (!entry) {
+      return null;
+    }
+
+    return {
+      id: entry.id,
+      numero: entry.numero,
+      texto: entry.texto,
+      eventKind: entry.event?.kind ?? null
+    };
+  }
+
+  function createValidationExportEntry(entry) {
+    if (!entry) {
+      return null;
+    }
+
+    return {
+      id: entry.id,
+      numero: entry.numero,
+      texto: entry.texto,
+      event: cloneData(entry.event)
+    };
+  }
+
+  function createStateLikeSummary(stateLike) {
+    if (!stateLike) {
+      return null;
+    }
+
+    return {
+      currentPlayerIndex: stateLike.currentPlayerIndex,
+      turnNumber: stateLike.turnNumber,
+      winnerPlayerId: stateLike.winner?.id ?? stateLike.winnerPlayerId ?? null,
+      selectedAttackerId: stateLike.selectedAttackerId ?? null,
+      selectedEffectCardInstanceId: stateLike.selectedEffectCard?.instanceId ?? null,
+      players: (stateLike.players || []).map((player) => ({
+        id: player.id,
+        nome: player.nome,
+        vida: player.vida,
+        manaAtual: player.manaAtual,
+        manaMax: player.manaMax,
+        handCount: player.hand?.length || 0,
+        board: (player.board || []).map((card) => ({
+          instanceId: card.instanceId,
+          vida: card.vida,
+          isDefending: Boolean(card.isDefending),
+          defendingTargetType: card.defendingTargetType ?? null,
+          defendingTargetPlayerIndex: card.defendingTargetPlayerIndex ?? null,
+          defendingTargetInstanceId: card.defendingTargetInstanceId ?? null
+        })),
+        supportZone: (player.supportZone || []).map((card) => card.instanceId)
+      }))
+    };
+  }
+
+  function getSelectedValidationIssueIndex(state) {
+    if (!state || !Array.isArray(state.logValidationIssues) || !state.logValidationIssues.length) {
+      return null;
+    }
+
+    if (
+      Number.isInteger(state.selectedValidationIssueIndex)
+      && state.selectedValidationIssueIndex >= 0
+      && state.selectedValidationIssueIndex < state.logValidationIssues.length
+    ) {
+      return state.selectedValidationIssueIndex;
+    }
+
+    return state.logValidationStatus === LOG_VALIDATION_STATUS.INVALID ? 0 : null;
+  }
+
+  function getSelectedValidationIssue(state) {
+    const issueIndex = getSelectedValidationIssueIndex(state);
+    return issueIndex == null ? null : state.logValidationIssues[issueIndex] || null;
+  }
+
+  function canCopyFocusedLogValidationIssue(state) {
+    return Boolean(
+      state
+      && state.logValidationStatus === LOG_VALIDATION_STATUS.INVALID
+      && getSelectedValidationIssue(state)
+    );
+  }
+
+  function selectLogValidationIssue(state, issueIndex) {
+    if (!state || !Array.isArray(state.logValidationIssues)) {
+      return null;
+    }
+
+    if (!Number.isInteger(issueIndex) || issueIndex < 0 || issueIndex >= state.logValidationIssues.length) {
+      state.selectedValidationIssueIndex = null;
+      return null;
+    }
+
+    const issue = state.logValidationIssues[issueIndex];
+    state.selectedValidationIssueIndex = issueIndex;
+    if (issue?.entryId != null) {
+      state.selectedLogEntryId = issue.entryId;
+    }
+    return issue;
+  }
+
+  function buildLogValidationExportPayload(state) {
+    const issueIndex = getSelectedValidationIssueIndex(state);
+    const issue = getSelectedValidationIssue(state);
+
+    if (!issue || issueIndex == null) {
+      return null;
+    }
+
+    const focusedEntryIndex = issue.entryId == null
+      ? -1
+      : state.log.findIndex((entry) => entry.id === issue.entryId);
+    const focusedEntry = focusedEntryIndex === -1 ? null : state.log[focusedEntryIndex];
+    const previousEntry = focusedEntryIndex > 0 ? state.log[focusedEntryIndex - 1] : null;
+    const nextEntry = focusedEntryIndex >= 0 && focusedEntryIndex < state.log.length - 1
+      ? state.log[focusedEntryIndex + 1]
+      : null;
+
+    return {
+      validationSummary: {
+        status: state.logValidationStatus,
+        validatedEntryCount: state.validatedEntryCount,
+        issueCount: state.logValidationIssues.length,
+        focusedIssueIndex: issueIndex
+      },
+      focusedIssue: cloneData(issue),
+      focusedEntry: createValidationExportEntry(focusedEntry),
+      previousEntry: createValidationExportEntry(previousEntry),
+      nextEntry: createValidationExportEntry(nextEntry),
+      focusedSnapshot: focusedEntry?.snapshot ? cloneData(focusedEntry.snapshot) : null
+    };
+  }
+
+  function copyTextToClipboard(text, options = {}) {
+    const clipboard = options.navigator?.clipboard
+      || (typeof navigator !== "undefined" ? navigator.clipboard : null);
+
+    if (clipboard && typeof clipboard.writeText === "function") {
+      const writeResult = clipboard.writeText(text);
+      if (writeResult && typeof writeResult.then === "function") {
+        return writeResult.then(() => true).catch(() => false);
+      }
+      return writeResult === false ? false : true;
+    }
+
+    const doc = options.document || (typeof document !== "undefined" ? document : null);
+    if (!doc || typeof doc.createElement !== "function" || !doc.body || typeof doc.execCommand !== "function") {
+      return false;
+    }
+
+    const textarea = doc.createElement("textarea");
+    textarea.value = text;
+    textarea.setAttribute("readonly", "true");
+    textarea.style.position = "fixed";
+    textarea.style.opacity = "0";
+    textarea.style.pointerEvents = "none";
+    doc.body.appendChild(textarea);
+    if (typeof textarea.select === "function") {
+      textarea.select();
+    }
+
+    let copied = false;
+    try {
+      copied = Boolean(doc.execCommand("copy"));
+    } finally {
+      doc.body.removeChild(textarea);
+    }
+
+    return copied;
+  }
+
+  function copyFocusedLogValidationIssue(state, options = {}) {
+    const payload = buildLogValidationExportPayload(state);
+
+    if (!payload) {
+      state.logValidationCopyFeedback = "Nao ha nenhum erro detalhado selecionado para copiar.";
+      state.logValidationCopyFeedbackStatus = "error";
+      return false;
+    }
+
+    const serializedPayload = JSON.stringify(payload, null, 2);
+    const finishCopy = (copied) => {
+      state.logValidationCopyFeedback = copied
+        ? "Erro detalhado copiado em JSON."
+        : "Nao foi possivel copiar o erro detalhado.";
+      state.logValidationCopyFeedbackStatus = copied ? "success" : "error";
+      return copied;
+    };
+
+    const copyResult = copyTextToClipboard(serializedPayload, options);
+    if (copyResult && typeof copyResult.then === "function") {
+      return copyResult
+        .then((copied) => finishCopy(Boolean(copied)))
+        .catch(() => finishCopy(false));
+    }
+
+    return finishCopy(Boolean(copyResult));
   }
 
   function findCardByInstanceId(cards, instanceId) {
@@ -1182,19 +1399,18 @@
     let validatedEntryCount = 0;
 
     if (logEntries[0]?.snapshot) {
-      let replayState = createReplayStateFromSnapshot(logEntries[0].snapshot);
       validatedEntryCount = 1;
 
       for (let entryIndex = 1; entryIndex < logEntries.length; entryIndex += 1) {
         const entry = logEntries[entryIndex];
         const previousEntry = logEntries[entryIndex - 1] || null;
-        if (!entry?.snapshot || !entry?.event) {
+        if (!entry?.snapshot || !entry?.event || !previousEntry?.snapshot) {
           continue;
         }
 
-        let workingState = createReplayStateFromSnapshot(createStateSnapshot(replayState));
+        let workingState = createReplayStateFromSnapshot(previousEntry.snapshot);
         let matched = false;
-        let lastApplyError = null;
+        let lastIssue = null;
         const maxSilentTransitions = 32;
 
         for (let silentTransitions = 0; silentTransitions <= maxSilentTransitions; silentTransitions += 1) {
@@ -1209,32 +1425,73 @@
           }
 
           const attemptState = createReplayStateFromSnapshot(createStateSnapshot(workingState));
+          const replayBeforeEvent = createStateLikeSummary(attemptState);
           const applyResult = applyLoggedEvent(attemptState, entry.event);
 
           if (!applyResult.ok) {
-            lastApplyError = applyResult;
+            lastIssue = createValidationIssue(entry, applyResult.code, applyResult.message, {
+              eventKind: entry.event.kind,
+              entryId: entry.id,
+              numero: entry.numero,
+              replayCurrentPlayerIndex: replayBeforeEvent?.currentPlayerIndex ?? null,
+              eventPlayerIndex: Number.isInteger(entry.event.playerIndex) ? entry.event.playerIndex : null,
+              silentTransitionsTried: silentTransitions,
+              lastApplyError: {
+                code: applyResult.code,
+                message: applyResult.message
+              },
+              previousEntry: createValidationEntrySummary(previousEntry),
+              event: cloneData(entry.event),
+              replayStateSummary: replayBeforeEvent
+            });
             continue;
           }
 
-          if (getSnapshotSignature(createStateSnapshot(attemptState)) === getSnapshotSignature(entry.snapshot)) {
-            replayState = attemptState;
+          const rebuiltSnapshot = createStateSnapshot(attemptState);
+          const rebuiltSignature = getSnapshotSignature(rebuiltSnapshot);
+          const expectedSignature = getSnapshotSignature(entry.snapshot);
+
+          if (rebuiltSignature === expectedSignature) {
             validatedEntryCount = entryIndex + 1;
             matched = true;
             break;
           }
 
-          lastApplyError = {
-            code: "snapshot-mismatch",
-            message: "O evento foi reaplicado, mas o snapshot reconstruido nao bate com o snapshot salvo."
-          };
+          lastIssue = createValidationIssue(
+            entry,
+            "snapshot-mismatch",
+            "O evento foi reaplicado, mas o snapshot reconstruido nao bate com o snapshot salvo.",
+            {
+              eventKind: entry.event.kind,
+              entryId: entry.id,
+              numero: entry.numero,
+              replayCurrentPlayerIndex: replayBeforeEvent?.currentPlayerIndex ?? null,
+              eventPlayerIndex: Number.isInteger(entry.event.playerIndex) ? entry.event.playerIndex : null,
+              silentTransitionsTried: silentTransitions,
+              lastApplyError: {
+                code: "snapshot-mismatch",
+                message: "O evento foi reaplicado, mas o snapshot reconstruido nao bate com o snapshot salvo."
+              },
+              previousEntry: createValidationEntrySummary(previousEntry),
+              event: cloneData(entry.event),
+              replayStateSummary: replayBeforeEvent,
+              reconstructedSnapshotSummary: createStateLikeSummary(rebuiltSnapshot),
+              expectedSnapshotSummary: createStateLikeSummary(entry.snapshot),
+              reconstructedSnapshotSignature: rebuiltSignature,
+              expectedSnapshotSignature: expectedSignature
+            }
+          );
         }
 
         if (!matched) {
-          issues.push(createValidationIssue(
-            entry,
-            lastApplyError?.code || "replay-failed",
-            lastApplyError?.message || "Nao foi possivel reproduzir esta linha do log a partir da linha anterior."
-          ));
+          issues.push(
+            lastIssue
+            || createValidationIssue(
+              entry,
+              "replay-failed",
+              "Nao foi possivel reproduzir esta linha do log a partir do snapshot anterior."
+            )
+          );
         }
       }
     }
@@ -3300,14 +3557,25 @@
 
   function renderLogValidation(state) {
     const validateButton = document.getElementById("validate-log-button");
+    const copyButton = document.getElementById("copy-validation-issue-button");
     const statusElement = document.getElementById("log-validation-status");
     const resultsElement = document.getElementById("log-validation-results");
+    const copyFeedbackElement = document.getElementById("log-validation-copy-feedback");
 
-    if (!validateButton || !statusElement || !resultsElement) {
+    if (!validateButton || !copyButton || !statusElement || !resultsElement || !copyFeedbackElement) {
       return;
     }
 
     validateButton.disabled = !state.log.length;
+    copyButton.hidden = state.logValidationStatus !== LOG_VALIDATION_STATUS.INVALID;
+    copyButton.disabled = !canCopyFocusedLogValidationIssue(state);
+    copyFeedbackElement.hidden = !state.logValidationCopyFeedback;
+    copyFeedbackElement.textContent = state.logValidationCopyFeedback || "";
+    copyFeedbackElement.className = state.logValidationCopyFeedbackStatus === "success"
+      ? "log-validation-copy-feedback status-success"
+      : state.logValidationCopyFeedbackStatus === "error"
+        ? "log-validation-copy-feedback status-error"
+        : "log-validation-copy-feedback";
 
     const statusClassName = state.logValidationStatus === LOG_VALIDATION_STATUS.VALID
       ? "log-validation-chip status-valid"
@@ -3344,19 +3612,19 @@
     const issuesList = document.createElement("div");
     issuesList.className = "log-validation-issues";
 
-    state.logValidationIssues.forEach((issue) => {
+    state.logValidationIssues.forEach((issue, issueIndex) => {
       const issueButton = document.createElement("button");
       issueButton.type = "button";
-      issueButton.className = "log-validation-issue";
+      issueButton.className = issueIndex === getSelectedValidationIssueIndex(state)
+        ? "log-validation-issue is-focused"
+        : "log-validation-issue";
       issueButton.innerHTML = `
         <span class="log-validation-issue-code">${issue.numero ? `Acao ${issue.numero}` : "Log"} · ${issue.code}</span>
         <span class="log-validation-issue-text">${issue.message}</span>
       `;
       issueButton.addEventListener("click", () => {
-        if (issue.entryId != null) {
-          state.selectedLogEntryId = issue.entryId;
-          render(state);
-        }
+        selectLogValidationIssue(state, issueIndex);
+        render(state);
       });
       issuesList.appendChild(issueButton);
     });
@@ -3861,6 +4129,18 @@
       render(gameState);
     });
 
+    document.getElementById("copy-validation-issue-button").addEventListener("click", () => {
+      const copyResult = copyFocusedLogValidationIssue(gameState);
+      if (copyResult && typeof copyResult.then === "function") {
+        copyResult.finally(() => {
+          render(gameState);
+        });
+        return;
+      }
+
+      render(gameState);
+    });
+
     document.getElementById("toggle-ai-match-button").addEventListener("click", () => {
       if (toggleAiVsAiPause(gameState)) {
         render(gameState);
@@ -4036,6 +4316,11 @@
       handleShortcutAction,
       getNextAiAction,
       validateCurrentLog,
+      buildLogValidationExportPayload,
+      canCopyFocusedLogValidationIssue,
+      selectLogValidationIssue,
+      copyTextToClipboard,
+      copyFocusedLogValidationIssue,
       performAiStep,
       getUnitAttack,
       getAvailableAttackers,

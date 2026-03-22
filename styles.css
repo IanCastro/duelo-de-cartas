@@ -611,6 +611,13 @@ select {
   flex-wrap: wrap;
 }
 
+.log-validation-toolbar-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
 .log-validation-chip {
   display: inline-flex;
   align-items: center;
@@ -652,6 +659,20 @@ select {
   line-height: 1.45;
 }
 
+.log-validation-copy-feedback {
+  min-height: 18px;
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
+.log-validation-copy-feedback.status-success {
+  color: var(--success);
+}
+
+.log-validation-copy-feedback.status-error {
+  color: #ff9b9b;
+}
+
 .log-validation-issues {
   display: flex;
   flex-direction: column;
@@ -676,6 +697,11 @@ select {
 .log-validation-issue:hover {
   transform: translateY(-1px);
   border-color: rgba(255, 122, 122, 0.45);
+}
+
+.log-validation-issue.is-focused {
+  border-color: rgba(244, 184, 96, 0.52);
+  background: rgba(244, 184, 96, 0.12);
 }
 
 .log-validation-issue-code {
