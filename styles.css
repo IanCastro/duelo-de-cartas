@@ -110,7 +110,7 @@ select {
 
 .match-config-grid {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr)) minmax(220px, 1.15fr);
   gap: 10px;
   align-items: stretch;
 }
@@ -181,6 +181,27 @@ select {
 .match-config-actions .action-button {
   min-height: 58px;
   padding: 12px 14px;
+}
+
+.match-count-picker[hidden] {
+  display: none !important;
+}
+
+.controller-number-input {
+  width: 100%;
+  min-width: 0;
+  padding: 10px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text);
+  font: inherit;
+}
+
+.controller-number-input:focus {
+  outline: 2px solid rgba(244, 184, 96, 0.45);
+  outline-offset: 2px;
+  border-color: rgba(244, 184, 96, 0.42);
 }
 
 .eyebrow {
@@ -276,6 +297,12 @@ select {
   gap: 14px;
 }
 
+.headless-ai-stats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
 .headless-ai-copy,
 .headless-ai-summary {
   margin: 0;
@@ -283,23 +310,10 @@ select {
   line-height: 1.5;
 }
 
-.headless-ai-final {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.headless-ai-log {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  max-height: 60vh;
-  overflow-y: auto;
-  padding-right: 4px;
-}
-
-.headless-ai-log .log-entry {
-  cursor: default;
+.headless-ai-error {
+  margin: 0;
+  color: #ffb0a8;
+  line-height: 1.5;
 }
 
 .board {
@@ -1511,6 +1525,10 @@ select {
 
   .ai-match-strip {
     align-items: stretch;
+  }
+
+  .headless-ai-stats {
+    grid-template-columns: 1fr;
   }
 }
 

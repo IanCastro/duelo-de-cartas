@@ -68,6 +68,11 @@
           </div>
         </div>
 
+        <div class="controller-picker match-count-picker" id="simulate-ai-match-count-picker" hidden>
+          <label class="controller-picker-label" for="simulate-ai-match-count">Partidas da simulacao</label>
+          <input id="simulate-ai-match-count" class="controller-number-input" type="number" min="1" max="1000" step="1" value="1" inputmode="numeric">
+        </div>
+
         <div class="match-config-actions">
           <button id="start-button" class="action-button" type="button">Start</button>
           <button id="simulate-ai-match-button" class="action-button secondary" type="button" hidden>Simular IA x IA</button>
@@ -85,11 +90,23 @@
         <span id="headless-ai-title">Simulacao IA x IA</span>
         <span id="headless-ai-status">Em andamento</span>
       </div>
-      <p id="headless-ai-copy" class="headless-ai-copy">Simulando IA x IA...</p>
-      <div id="headless-ai-final" class="headless-ai-final" hidden>
-        <p id="headless-ai-summary" class="headless-ai-summary"></p>
-        <div id="headless-ai-log" class="headless-ai-log"></div>
+      <p id="headless-ai-copy" class="headless-ai-copy">Simulando uma bateria IA x IA...</p>
+      <div class="headless-ai-stats">
+        <div class="stat">
+          <span class="stat-label">Progresso</span>
+          <strong id="headless-ai-progress">0/1</strong>
+        </div>
+        <div class="stat">
+          <span class="stat-label">Sentinela Azul</span>
+          <strong id="headless-ai-player-1-wins">0</strong>
+        </div>
+        <div class="stat">
+          <span class="stat-label">Guardiao Rubro</span>
+          <strong id="headless-ai-player-2-wins">0</strong>
+        </div>
       </div>
+      <p id="headless-ai-summary" class="headless-ai-summary"></p>
+      <p id="headless-ai-error" class="headless-ai-error" hidden></p>
     </section>
 
     <section class="board">
@@ -265,7 +282,7 @@
           <p>Voce tambem pode escolher entre baralho Compartilhado e Separado. O default e Separado, com 2 copias de cada carta por jogador. No Compartilhado, o jogo usa o baralho unico atual com 4 copias de cada carta.</p>
           <p>Depois que a partida comeca, essa configuracao fica travada. Use Nova partida para abandonar a partida atual e voltar ao pre-jogo com a configuracao preservada.</p>
           <p>Se voce definir os dois jogadores como IA, a partida roda automaticamente em IA vs IA. Se definir apenas um lado como IA, esse lado joga sozinho quando o turno dele comecar.</p>
-          <p>Quando os dois lados estiverem como IA, voce tambem pode usar Simular IA x IA para rodar a partida sem tabuleiro e ver apenas o log final ao terminar.</p>
+          <p>Quando os dois lados estiverem como IA, voce tambem pode usar Simular IA x IA para rodar uma bateria de partidas sem tabuleiro, escolhendo quantas partidas quer executar e vendo apenas o placar final ao terminar.</p>
           <p>Unidades ficam em campo. Suportes permanecem ativos. Efeitos entram em selecao de alvo e vao para o descarte quando resolvidos.</p>
           <p>Selecione uma unidade pronta e clique em outra unidade aliada ou no proprio heroi para coloca-la defendendo esse alvo. A defensora fica deitada, recebe metade do dano arredondado para cima e impede ataques diretos ao alvo protegido enquanto permanecer em campo.</p>
           <p>Cada unidade pode atacar no turno em que entra em campo e depois 1 vez por turno. Se o rival nao tiver unidades em campo, voce pode destruir um suporte com 1 ataque. Reparo Rapido so pode curar alvos feridos.</p>

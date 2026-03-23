@@ -7,11 +7,21 @@
   const SEPARATE_DECK_COPIES_PER_TYPE = 2;
   const AI_STEP_DELAY_MS = 500;
   const HEADLESS_AI_BATCH_SIZE = 40;
+  const HEADLESS_AI_BATCH_MIN_MATCHES = 1;
+  const HEADLESS_AI_BATCH_DEFAULT_MATCHES = 1;
+  const HEADLESS_AI_BATCH_MAX_MATCHES = 1000;
+  const HEADLESS_AI_MATCH_ACTION_LIMIT = 4000;
   const MATCH_HISTORY_STORAGE_KEY = "duelo-de-cartas-match-history-v1";
   const MAX_SAVED_MATCHES = 20;
   const MATCH_PRESENTATION_MODES = Object.freeze({
     VISUAL: "visual",
     HEADLESS_AI_VS_AI: "headless-ai-vs-ai"
+  });
+  const HEADLESS_BATCH_STATUSES = Object.freeze({
+    IDLE: "idle",
+    RUNNING: "running",
+    FINISHED: "finished",
+    FAILED: "failed"
   });
   const DECK_MODES = Object.freeze({
     SHARED: "shared",
@@ -263,6 +273,18 @@
       playerControllers: normalizePlayerControllers(record.playerControllers),
       deckMode: normalizeDeckMode(record.deckMode)
     };
+  }
+
+  function normalizeHeadlessBatchCount(value) {
+    const parsed = Number.parseInt(value, 10);
+    if (!Number.isFinite(parsed)) {
+      return HEADLESS_AI_BATCH_DEFAULT_MATCHES;
+    }
+
+    return Math.min(
+      HEADLESS_AI_BATCH_MAX_MATCHES,
+      Math.max(HEADLESS_AI_BATCH_MIN_MATCHES, parsed)
+    );
   }
 
   function isSupportedDeckMode(deckMode) {
@@ -591,7 +613,7 @@
       recordId: null
     };
 
-    if (!state?.isMatchStarted || state.hasCurrentMatchBeenSavedToHistory) {
+    if (!state?.isMatchStarted || state.hasCurrentMatchBeenSavedToHistory || state.isHeadlessBatchInternal) {
       return result;
     }
 
@@ -725,6 +747,16 @@
       isMatchStarted: false,
       matchPresentationMode: MATCH_PRESENTATION_MODES.VISUAL,
       isHeadlessSimulationRunning: false,
+      headlessBatchRequestedCount: HEADLESS_AI_BATCH_DEFAULT_MATCHES,
+      headlessBatchCompletedCount: 0,
+      headlessBatchWins: [0, 0],
+      headlessBatchCurrentMatchNumber: 0,
+      headlessBatchCurrentMatchActionCount: 0,
+      headlessBatchStatus: HEADLESS_BATCH_STATUSES.IDLE,
+      headlessBatchErrorMessage: null,
+      headlessBatchMatchState: null,
+      isHeadlessBatchInternal: false,
+      suppressValidationAlerts: false,
       isAiVsAiPaused: false,
       isAiTurnInProgress: false,
       aiStepText: null,
@@ -766,6 +798,7 @@
     const preservedControllers = setSessionPlayerControllers(previousState?.playerControllers);
     nextState.playerControllers = preservedControllers;
     nextState.deckMode = setSessionDeckMode(previousState?.deckMode);
+    nextState.headlessBatchRequestedCount = normalizeHeadlessBatchCount(previousState?.headlessBatchRequestedCount);
     nextState.isLibraryOpen = Boolean(previousState?.isLibraryOpen);
     nextState.isRulesOpen = Boolean(previousState?.isRulesOpen);
     nextState.isLogOpen = Boolean(previousState?.isLogOpen);
@@ -814,13 +847,14 @@
 
     nextState.playerControllers = setSessionPlayerControllers(previousState.playerControllers);
     nextState.deckMode = setSessionDeckMode(previousState.deckMode);
+    nextState.headlessBatchRequestedCount = normalizeHeadlessBatchCount(previousState.headlessBatchRequestedCount);
     nextState.isLibraryOpen = Boolean(previousState.isLibraryOpen);
     nextState.isRulesOpen = Boolean(previousState.isRulesOpen);
     nextState.isLogOpen = Boolean(previousState.isLogOpen);
     nextState.isHistoryOpen = Boolean(previousState.isHistoryOpen);
     nextState.matchHistory = (previousState.matchHistory || []).map((record) => cloneSavedMatchRecord(record));
 
-    if (previousState.isMatchStarted) {
+    if (previousState.isMatchStarted && !isHeadlessAiVsAiMode(previousState)) {
       archiveCurrentMatchIfNeeded(previousState, previousState.winner ? "finished" : "abandoned", options);
       nextState.matchHistory = (previousState.matchHistory || []).map((record) => cloneSavedMatchRecord(record));
     }
@@ -871,7 +905,7 @@
   function validateCurrentLog(state, options = {}) {
     const result = applyLogValidationResult(state, validateMatchLog(state.log));
 
-    if (options.alertOnFailure && result.status === LOG_VALIDATION_STATUS.INVALID) {
+    if (options.alertOnFailure && !state?.suppressValidationAlerts && result.status === LOG_VALIDATION_STATUS.INVALID) {
       const problemCount = result.issues.length;
       const message = problemCount === 1
         ? "A validacao automatica do log encontrou 1 problema. Abra o menu Log para revisar."
@@ -1047,6 +1081,16 @@
       isMatchStarted: Boolean(snapshot.isMatchStarted),
       matchPresentationMode: MATCH_PRESENTATION_MODES.VISUAL,
       isHeadlessSimulationRunning: false,
+      headlessBatchRequestedCount: HEADLESS_AI_BATCH_DEFAULT_MATCHES,
+      headlessBatchCompletedCount: 0,
+      headlessBatchWins: [0, 0],
+      headlessBatchCurrentMatchNumber: 0,
+      headlessBatchCurrentMatchActionCount: 0,
+      headlessBatchStatus: HEADLESS_BATCH_STATUSES.IDLE,
+      headlessBatchErrorMessage: null,
+      headlessBatchMatchState: null,
+      isHeadlessBatchInternal: false,
+      suppressValidationAlerts: false,
       isAiVsAiPaused: false,
       isAiTurnInProgress: false,
       aiStepText: null,
@@ -2144,7 +2188,6 @@
     return Boolean(
       state
       && state.matchPresentationMode === MATCH_PRESENTATION_MODES.HEADLESS_AI_VS_AI
-      && isAiVsAiMatch(state)
     );
   }
 
@@ -2187,7 +2230,7 @@
     return Boolean(
       isHeadlessAiVsAiMode(state)
       && state.isHeadlessSimulationRunning
-      && canAiTakeStep(state, { ignorePause: true })
+      && state.headlessBatchStatus === HEADLESS_BATCH_STATUSES.RUNNING
     );
   }
 
@@ -2214,26 +2257,50 @@
     }
   }
 
-  function startHeadlessAiMatch(previousState) {
-    if (!isAiControlledPlayer(previousState, 0) || !isAiControlledPlayer(previousState, 1)) {
-      return startConfiguredMatch(previousState);
+  function resetHeadlessBatchRuntime(state) {
+    state.isHeadlessSimulationRunning = false;
+    state.headlessBatchCompletedCount = 0;
+    state.headlessBatchWins = [0, 0];
+    state.headlessBatchCurrentMatchNumber = 0;
+    state.headlessBatchCurrentMatchActionCount = 0;
+    state.headlessBatchStatus = HEADLESS_BATCH_STATUSES.IDLE;
+    state.headlessBatchErrorMessage = null;
+    state.headlessBatchMatchState = null;
+  }
+
+  function createHeadlessBatchMatchState(state) {
+    const pregameState = createInitialState();
+    pregameState.playerControllers = normalizePlayerControllers(state.playerControllers);
+    pregameState.deckMode = normalizeDeckMode(state.deckMode);
+
+    const matchState = startConfiguredMatch(pregameState);
+    matchState.matchHistory = [];
+    matchState.currentMatchId = null;
+    matchState.hasCurrentMatchBeenSavedToHistory = false;
+    matchState.isHeadlessBatchInternal = true;
+    matchState.suppressValidationAlerts = true;
+    matchState.isLibraryOpen = false;
+    matchState.isRulesOpen = false;
+    matchState.isLogOpen = false;
+    matchState.isHistoryOpen = false;
+    return matchState;
+  }
+
+  function failHeadlessAiBatch(state, message) {
+    if (!isHeadlessAiVsAiMode(state)) {
+      return false;
     }
 
-    const nextState = startConfiguredMatch(previousState);
-    nextState.matchPresentationMode = MATCH_PRESENTATION_MODES.HEADLESS_AI_VS_AI;
-    nextState.isHeadlessSimulationRunning = true;
-    nextState.isAiVsAiPaused = false;
-    nextState.isAiTurnInProgress = true;
-    nextState.aiStepText = "Simulando IA x IA...";
-    nextState.isLibraryOpen = false;
-    nextState.isRulesOpen = false;
-    nextState.isLogOpen = false;
-    nextState.isHistoryOpen = false;
-    nextState.selectedLogEntryId = null;
-    nextState.selectedHistoryMatchId = null;
-    nextState.selectedHistoryLogEntryId = null;
-    nextState.isWinnerModalOpen = false;
-    return nextState;
+    cancelHeadlessSimulation();
+    state.isHeadlessSimulationRunning = false;
+    state.isAiTurnInProgress = false;
+    state.isAiVsAiPaused = false;
+    state.headlessBatchStatus = HEADLESS_BATCH_STATUSES.FAILED;
+    state.headlessBatchErrorMessage = message;
+    state.headlessBatchMatchState = null;
+    state.headlessBatchCurrentMatchActionCount = 0;
+    state.aiStepText = "A simulacao em lote falhou.";
+    return true;
   }
 
   function finishHeadlessAiMatch(state) {
@@ -2251,9 +2318,95 @@
     state.isLogOpen = false;
     state.isHistoryOpen = false;
     state.selectedLogEntryId = null;
-    state.aiStepText = state.winner
-      ? `${state.winner.nome} venceu apos ${state.log.length} acao(oes).`
-      : "Simulacao IA x IA encerrada.";
+    state.headlessBatchMatchState = null;
+    state.headlessBatchCurrentMatchActionCount = 0;
+    if (state.headlessBatchStatus !== HEADLESS_BATCH_STATUSES.FAILED) {
+      state.headlessBatchStatus = HEADLESS_BATCH_STATUSES.FINISHED;
+      state.aiStepText = "Bateria IA x IA concluida.";
+    }
+    return true;
+  }
+
+  function cancelHeadlessAiBatch(state) {
+    if (!isHeadlessAiVsAiMode(state)) {
+      return false;
+    }
+
+    cancelHeadlessSimulation();
+    resetHeadlessBatchRuntime(state);
+    state.isAiTurnInProgress = false;
+    state.isAiVsAiPaused = false;
+    state.aiStepText = null;
+    return true;
+  }
+
+  function startHeadlessAiBatch(previousState, requestedCount = previousState?.headlessBatchRequestedCount) {
+    if (!isAiControlledPlayer(previousState, 0) || !isAiControlledPlayer(previousState, 1)) {
+      return startConfiguredMatch(previousState);
+    }
+
+    const nextState = createInitialState();
+    nextState.playerControllers = setSessionPlayerControllers(previousState?.playerControllers);
+    nextState.deckMode = setSessionDeckMode(previousState?.deckMode);
+    nextState.headlessBatchRequestedCount = normalizeHeadlessBatchCount(requestedCount);
+    nextState.matchHistory = (previousState?.matchHistory || []).map((record) => cloneSavedMatchRecord(record));
+    nextState.currentMatchId = createUniqueMatchId();
+    nextState.isMatchStarted = true;
+    nextState.matchPresentationMode = MATCH_PRESENTATION_MODES.HEADLESS_AI_VS_AI;
+    nextState.isHeadlessSimulationRunning = true;
+    nextState.headlessBatchCompletedCount = 0;
+    nextState.headlessBatchWins = [0, 0];
+    nextState.headlessBatchCurrentMatchNumber = 0;
+    nextState.headlessBatchCurrentMatchActionCount = 0;
+    nextState.headlessBatchStatus = HEADLESS_BATCH_STATUSES.RUNNING;
+    nextState.headlessBatchErrorMessage = null;
+    nextState.headlessBatchMatchState = null;
+    nextState.isAiVsAiPaused = false;
+    nextState.isAiTurnInProgress = true;
+    nextState.aiStepText = "Simulando bateria IA x IA...";
+    nextState.isLibraryOpen = false;
+    nextState.isRulesOpen = false;
+    nextState.isLogOpen = false;
+    nextState.isHistoryOpen = false;
+    nextState.selectedLogEntryId = null;
+    nextState.selectedHistoryMatchId = null;
+    nextState.selectedHistoryLogEntryId = null;
+    nextState.isWinnerModalOpen = false;
+    return nextState;
+  }
+
+  function startHeadlessAiMatch(previousState, requestedCount = previousState?.headlessBatchRequestedCount) {
+    return startHeadlessAiBatch(previousState, requestedCount);
+  }
+
+  function completeHeadlessBatchMatch(state) {
+    const matchState = state.headlessBatchMatchState;
+    if (!matchState?.winner) {
+      return failHeadlessAiBatch(
+        state,
+        `A partida ${state.headlessBatchCurrentMatchNumber} nao terminou com um vencedor valido.`
+      );
+    }
+
+    if (matchState.logValidationStatus !== LOG_VALIDATION_STATUS.VALID) {
+      return failHeadlessAiBatch(
+        state,
+        `A validacao do log falhou na partida ${state.headlessBatchCurrentMatchNumber}.`
+      );
+    }
+
+    state.headlessBatchCompletedCount += 1;
+    state.headlessBatchWins[matchState.winner.id - 1] += 1;
+    state.headlessBatchMatchState = null;
+    state.headlessBatchCurrentMatchActionCount = 0;
+
+    if (state.headlessBatchCompletedCount >= state.headlessBatchRequestedCount) {
+      finishHeadlessAiMatch(state);
+      return true;
+    }
+
+    state.headlessBatchCurrentMatchNumber = state.headlessBatchCompletedCount + 1;
+    state.aiStepText = `Preparando a partida ${state.headlessBatchCurrentMatchNumber} de ${state.headlessBatchRequestedCount}.`;
     return true;
   }
 
@@ -2662,17 +2815,43 @@
     let actionsPerformed = 0;
 
     while (actionsPerformed < batchSize && shouldRunHeadlessSimulation(state)) {
-      const action = performAiStep(state, { ignorePause: true });
+      if (!state.headlessBatchMatchState) {
+        state.headlessBatchCurrentMatchNumber = state.headlessBatchCompletedCount + 1;
+        state.headlessBatchMatchState = createHeadlessBatchMatchState(state);
+        state.headlessBatchCurrentMatchActionCount = 0;
+        state.aiStepText = `Simulando partida ${state.headlessBatchCurrentMatchNumber} de ${state.headlessBatchRequestedCount}.`;
+      }
+
+      const matchState = state.headlessBatchMatchState;
+      if (matchState.winner) {
+        completeHeadlessBatchMatch(state);
+        continue;
+      }
+
+      const action = performAiStep(matchState, { ignorePause: true });
 
       if (!action) {
+        failHeadlessAiBatch(
+          state,
+          `A simulacao travou na partida ${state.headlessBatchCurrentMatchNumber} sem produzir uma nova acao.`
+        );
         break;
       }
 
       actionsPerformed += 1;
-    }
+      state.headlessBatchCurrentMatchActionCount += 1;
 
-    if (state.winner) {
-      finishHeadlessAiMatch(state);
+      if (state.headlessBatchCurrentMatchActionCount > HEADLESS_AI_MATCH_ACTION_LIMIT) {
+        failHeadlessAiBatch(
+          state,
+          `A partida ${state.headlessBatchCurrentMatchNumber} excedeu o limite de ${HEADLESS_AI_MATCH_ACTION_LIMIT} acoes.`
+        );
+        break;
+      }
+
+      if (matchState.winner) {
+        completeHeadlessBatchMatch(state);
+      }
     }
 
     return actionsPerformed;
@@ -2692,7 +2871,7 @@
       headlessSimulationTimerId = null;
 
       if (!shouldRunHeadlessSimulation(gameState)) {
-        if (gameState.winner) {
+        if (gameState.headlessBatchStatus === HEADLESS_BATCH_STATUSES.FINISHED) {
           finishHeadlessAiMatch(gameState);
         }
         render(gameState);
@@ -4578,25 +4757,35 @@
       return "";
     }
 
-    if (state.isHeadlessSimulationRunning) {
-      return "Simulando";
+    if (state.headlessBatchStatus === HEADLESS_BATCH_STATUSES.RUNNING) {
+      return "Em andamento";
     }
 
-    return state.winner ? "Concluida" : "Encerrada";
+    if (state.headlessBatchStatus === HEADLESS_BATCH_STATUSES.FAILED) {
+      return "Falhou";
+    }
+
+    if (state.headlessBatchStatus === HEADLESS_BATCH_STATUSES.FINISHED) {
+      return "Concluida";
+    }
+
+    return "Encerrada";
   }
 
   function getHeadlessAiSummaryText(state) {
-    const validationLabel = getLogValidationStatusLabel(state);
-
-    if (state.isHeadlessSimulationRunning) {
-      return `Simulando IA x IA... ${state.log.length} acao(oes) registradas ate agora.`;
+    if (state.headlessBatchStatus === HEADLESS_BATCH_STATUSES.RUNNING) {
+      return `Simulando bateria IA x IA. Partida atual: ${state.headlessBatchCurrentMatchNumber || 1} de ${state.headlessBatchRequestedCount}.`;
     }
 
-    if (state.winner) {
-      return `${state.winner.nome} venceu apos ${state.log.length} acao(oes). ${validationLabel}.`;
+    if (state.headlessBatchStatus === HEADLESS_BATCH_STATUSES.FAILED) {
+      return "A bateria foi interrompida antes de concluir todas as partidas.";
     }
 
-    return `Simulacao encerrada apos ${state.log.length} acao(oes). ${validationLabel}.`;
+    return `Placar final: Sentinela Azul ${state.headlessBatchWins[0]} x ${state.headlessBatchWins[1]} Guardiao Rubro.`;
+  }
+
+  function getHeadlessAiProgressText(state) {
+    return `${state.headlessBatchCompletedCount}/${state.headlessBatchRequestedCount}`;
   }
 
   function renderHeadlessAiPanel(state) {
@@ -4604,11 +4793,13 @@
     const title = document.getElementById("headless-ai-title");
     const status = document.getElementById("headless-ai-status");
     const copy = document.getElementById("headless-ai-copy");
-    const finalSection = document.getElementById("headless-ai-final");
+    const progress = document.getElementById("headless-ai-progress");
+    const playerOneWins = document.getElementById("headless-ai-player-1-wins");
+    const playerTwoWins = document.getElementById("headless-ai-player-2-wins");
     const summary = document.getElementById("headless-ai-summary");
-    const logElement = document.getElementById("headless-ai-log");
+    const error = document.getElementById("headless-ai-error");
 
-    if (!panel || !title || !status || !copy || !finalSection || !summary || !logElement) {
+    if (!panel || !title || !status || !copy || !progress || !playerOneWins || !playerTwoWins || !summary || !error) {
       return;
     }
 
@@ -4620,36 +4811,19 @@
     }
 
     const running = state.isHeadlessSimulationRunning;
-    title.textContent = running ? "Simulacao IA x IA" : "Log final da simulacao";
+    title.textContent = running ? "Simulacao IA x IA" : "Resultado da simulacao";
     status.textContent = getHeadlessAiStatusText(state);
     copy.textContent = running
-      ? "Simulando IA x IA sem tabuleiro. O log completo aparecera ao terminar."
-      : "A simulacao terminou. Confira abaixo o log final desta partida.";
-    finalSection.hidden = running;
+      ? "Simulando uma bateria IA x IA sem tabuleiro. O placar parcial e atualizado automaticamente."
+      : state.headlessBatchStatus === HEADLESS_BATCH_STATUSES.FAILED
+        ? "A bateria falhou antes de concluir todas as partidas."
+        : "A bateria terminou. Confira abaixo quantas partidas cada lado venceu.";
+    progress.textContent = getHeadlessAiProgressText(state);
+    playerOneWins.textContent = String(state.headlessBatchWins[0]);
+    playerTwoWins.textContent = String(state.headlessBatchWins[1]);
     summary.textContent = getHeadlessAiSummaryText(state);
-    logElement.innerHTML = "";
-
-    if (running) {
-      return;
-    }
-
-    if (!state.log.length) {
-      const empty = document.createElement("div");
-      empty.className = "empty-state";
-      empty.textContent = "Nenhuma acao foi registrada nesta simulacao.";
-      logElement.appendChild(empty);
-      return;
-    }
-
-    getDisplayLogEntries(state.log).forEach((entry) => {
-      const item = document.createElement("div");
-      item.className = "log-entry";
-      item.innerHTML = `
-        <span class="log-entry-number">${entry.numero}</span>
-        <span class="log-entry-text">${entry.texto}</span>
-      `;
-      logElement.appendChild(item);
-    });
+    error.hidden = !state.headlessBatchErrorMessage;
+    error.textContent = state.headlessBatchErrorMessage || "";
   }
 
   function render(state) {
@@ -4779,6 +4953,8 @@
     const toggleHistoryButton = document.getElementById("toggle-history-button");
     const startButton = document.getElementById("start-button");
     const simulateAiMatchButton = document.getElementById("simulate-ai-match-button");
+    const simulateAiMatchCountPicker = document.getElementById("simulate-ai-match-count-picker");
+    const simulateAiMatchCountInput = document.getElementById("simulate-ai-match-count");
     const restartButton = document.getElementById("restart-button");
     const aiMatchStrip = document.getElementById("ai-match-strip");
     const aiMatchText = document.getElementById("ai-match-text");
@@ -4834,6 +5010,12 @@
     if (startButton) {
       startButton.hidden = state.isMatchStarted;
       startButton.disabled = state.isMatchStarted;
+    }
+
+    if (simulateAiMatchCountPicker && simulateAiMatchCountInput) {
+      simulateAiMatchCountPicker.hidden = !headlessSimulationReady;
+      simulateAiMatchCountInput.disabled = !headlessSimulationReady;
+      simulateAiMatchCountInput.value = String(normalizeHeadlessBatchCount(state.headlessBatchRequestedCount));
     }
 
     if (simulateAiMatchButton) {
@@ -5098,6 +5280,21 @@
       });
     });
 
+    const simulateAiMatchCountInput = document.getElementById("simulate-ai-match-count");
+    if (simulateAiMatchCountInput) {
+      const syncHeadlessBatchCount = () => {
+        if (gameState.isMatchStarted) {
+          return;
+        }
+
+        gameState.headlessBatchRequestedCount = normalizeHeadlessBatchCount(simulateAiMatchCountInput.value);
+        render(gameState);
+      };
+
+      simulateAiMatchCountInput.addEventListener("input", syncHeadlessBatchCount);
+      simulateAiMatchCountInput.addEventListener("change", syncHeadlessBatchCount);
+    }
+
     document.getElementById("start-button").addEventListener("click", () => {
       if (gameState.isMatchStarted) {
         return;
@@ -5116,7 +5313,10 @@
 
       cancelHeadlessSimulation();
       cancelAiTurn(gameState);
-      gameState = startHeadlessAiMatch(gameState);
+      const requestedCount = normalizeHeadlessBatchCount(
+        simulateAiMatchCountInput ? simulateAiMatchCountInput.value : gameState.headlessBatchRequestedCount
+      );
+      gameState = startHeadlessAiBatch(gameState, requestedCount);
       render(gameState);
     });
 
@@ -5219,6 +5419,8 @@
       SEPARATE_DECK_COPIES_PER_TYPE,
       AI_STEP_DELAY_MS,
       HEADLESS_AI_BATCH_SIZE,
+      HEADLESS_AI_BATCH_DEFAULT_MATCHES,
+      HEADLESS_AI_BATCH_MAX_MATCHES,
       MATCH_HISTORY_STORAGE_KEY,
       MAX_SAVED_MATCHES,
       MATCH_PRESENTATION_MODES,
@@ -5295,7 +5497,10 @@
       selectLogValidationIssue,
       copyTextToClipboard,
       copyFocusedLogValidationIssue,
+      startHeadlessAiBatch,
       startHeadlessAiMatch,
+      finishHeadlessAiMatch,
+      cancelHeadlessAiBatch,
       performAiStep,
       performHeadlessSimulationBatch,
       getUnitAttack,

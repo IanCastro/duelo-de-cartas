@@ -124,6 +124,7 @@ test("initial state opens in pre-game with default player controllers", () => {
   assert(state.playerControllers[0] === game.PLAYER_CONTROLLER_TYPES.HUMAN, "player 1 should default to human");
   assert(state.playerControllers[1] === game.PLAYER_CONTROLLER_TYPES.AI, "player 2 should default to ai");
   assert(state.deckMode === game.DECK_MODES.SEPARATE, "pre-game should default to separate decks");
+  assert(state.headlessBatchRequestedCount === 1, "the headless ai-vs-ai batch input should default to 1 match");
   assert(Array.isArray(state.log), "game should keep a log array");
   assert(state.log.length === 0, "pre-game should not start with match log entries");
 });
@@ -573,19 +574,22 @@ test("starting with both players as ai enables ai vs ai", () => {
   assert(game.isHeadlessAiVsAiMode(startedState) === false, "normal Start should keep ai-vs-ai in the visual presentation mode");
 });
 
-test("headless ai-vs-ai start enters the hidden-board presentation mode", () => {
+test("headless ai-vs-ai batch start enters the hidden-board presentation mode", () => {
   const pregameState = game.createInitialState();
   pregameState.playerControllers = [game.PLAYER_CONTROLLER_TYPES.AI, game.PLAYER_CONTROLLER_TYPES.AI];
   pregameState.isLibraryOpen = true;
   pregameState.isLogOpen = true;
+  pregameState.headlessBatchRequestedCount = 3;
 
   const startedState = game.startHeadlessAiMatch(pregameState);
 
-  assert(startedState.isMatchStarted === true, "headless ai-vs-ai should still create a valid active match");
-  assert(game.isHeadlessAiVsAiMode(startedState) === true, "headless ai-vs-ai start should switch the presentation mode");
-  assert(startedState.isHeadlessSimulationRunning === true, "headless ai-vs-ai should begin in the running state");
-  assert(startedState.isLibraryOpen === false && startedState.isLogOpen === false && startedState.isHistoryOpen === false, "headless ai-vs-ai should close any side panels before starting");
-  assert(startedState.aiStepText === "Simulando IA x IA...", "headless ai-vs-ai should expose a minimal simulation status");
+  assert(startedState.isMatchStarted === true, "headless ai-vs-ai batch should still create an active session state");
+  assert(game.isHeadlessAiVsAiMode(startedState) === true, "headless ai-vs-ai batch should switch the presentation mode");
+  assert(startedState.isHeadlessSimulationRunning === true, "headless ai-vs-ai batch should begin in the running state");
+  assert(startedState.isLibraryOpen === false && startedState.isLogOpen === false && startedState.isHistoryOpen === false, "headless ai-vs-ai batch should close any side panels before starting");
+  assert(startedState.headlessBatchRequestedCount === 3, "headless ai-vs-ai batch should respect the configured number of matches");
+  assert(startedState.headlessBatchStatus === "running", "headless ai-vs-ai batch should start in the running status");
+  assert(startedState.aiStepText === "Simulando bateria IA x IA...", "headless ai-vs-ai batch should expose a batch-oriented status");
 });
 
 test("ai vs ai can be paused and resumed", () => {
@@ -607,63 +611,53 @@ test("ai vs ai can be paused and resumed", () => {
   assert(state.aiStepText === "IA retomou a partida.", "resuming should expose a clear resume status");
 });
 
-test("headless ai-vs-ai ignores the pause toggle and finishes into the log-only state", () => {
+test("headless ai-vs-ai batch clamps the requested match count", () => {
+  const startedState = game.startHeadlessAiMatch({
+    ...game.createInitialState(),
+    playerControllers: [game.PLAYER_CONTROLLER_TYPES.AI, game.PLAYER_CONTROLLER_TYPES.AI]
+  }, 5005);
+
+  assert(startedState.headlessBatchRequestedCount === 1000, "the batch runner should clamp the requested number of matches to the configured maximum");
+});
+
+test("headless ai-vs-ai batch ignores the pause toggle and finishes with an aggregate scoreboard", () => {
   const state = game.startHeadlessAiMatch({
     ...game.createInitialState(),
     playerControllers: [game.PLAYER_CONTROLLER_TYPES.AI, game.PLAYER_CONTROLLER_TYPES.AI]
-  });
+  }, 5);
 
   const toggled = game.toggleAiVsAiPause(state);
   let guard = 0;
 
-  while (state.isHeadlessSimulationRunning && guard < 400) {
+  while (state.isHeadlessSimulationRunning && guard < 800) {
     const actions = game.performHeadlessSimulationBatch(state, 80);
-    assert(actions > 0, "each headless simulation batch should make progress until the match finishes");
+    assert(actions > 0 || !state.isHeadlessSimulationRunning, "each headless simulation batch should make progress until the battery finishes");
     guard += 1;
   }
 
-  assert(toggled === false, "headless ai-vs-ai should not expose pause/resume");
-  assert(guard < 400, "headless ai-vs-ai should finish in a bounded number of batches");
-  assert(state.winner, "headless ai-vs-ai should finish with a winner");
-  assert(state.isHeadlessSimulationRunning === false, "headless ai-vs-ai should stop running once the match finishes");
-  assert(state.logValidationStatus === game.LOG_VALIDATION_STATUS.VALID, "headless ai-vs-ai should keep automatic log validation at the end");
-  assert(state.matchHistory.length === 1 && state.matchHistory[0].status === "finished", "headless ai-vs-ai should still archive finished matches");
-  assert(state.aiStepText.includes("venceu"), "headless ai-vs-ai should end with a winner summary");
+  assert(toggled === false, "headless ai-vs-ai batch should not expose pause/resume");
+  assert(guard < 800, "headless ai-vs-ai batch should finish in a bounded number of ticks");
+  assert(state.isHeadlessSimulationRunning === false, "headless ai-vs-ai batch should stop running once the battery finishes");
+  assert(state.headlessBatchCompletedCount === 5, "the batch should complete the requested number of matches");
+  assert(state.headlessBatchWins[0] + state.headlessBatchWins[1] === 5, "the aggregate scoreboard should account for every finished match");
+  assert(state.matchHistory.length === 0, "headless ai-vs-ai batches should not create history entries");
+  assert(state.log.length === 0, "headless ai-vs-ai batches should not expose a live detailed log on the host state");
+  assert(state.headlessBatchErrorMessage === null, "successful batches should finish without an error message");
+  assert(state.aiStepText === "Bateria IA x IA concluida.", "headless ai-vs-ai batch should end with a concise completion status");
 });
 
-test("restarting a headless ai-vs-ai match archives it as abandoned", () => {
+test("restarting a headless ai-vs-ai batch returns to pre-game without archiving history", () => {
   const storage = createMemoryStorage();
   const state = game.startHeadlessAiMatch({
     ...game.createInitialState(),
     playerControllers: [game.PLAYER_CONTROLLER_TYPES.AI, game.PLAYER_CONTROLLER_TYPES.AI]
-  });
+  }, 4);
 
   const restartedState = game.createRestartState(state, { storage });
 
-  assert(restartedState.isMatchStarted === false, "restarting headless ai-vs-ai should return to pre-game");
-  assert(restartedState.matchHistory.length === 1, "restarting headless ai-vs-ai should archive the interrupted match");
-  assert(restartedState.matchHistory[0].status === "abandoned", "interrupted headless ai-vs-ai should be saved as abandoned");
-});
-
-test("restoring a headless ai-vs-ai history record returns to the normal visual presentation", () => {
-  const storage = createMemoryStorage();
-  const state = game.startHeadlessAiMatch({
-    ...game.createInitialState(),
-    playerControllers: [game.PLAYER_CONTROLLER_TYPES.AI, game.PLAYER_CONTROLLER_TYPES.AI]
-  });
-  let guard = 0;
-
-  while (state.isHeadlessSimulationRunning && guard < 400) {
-    game.performHeadlessSimulationBatch(state, 80);
-    guard += 1;
-  }
-
-  const record = state.matchHistory[0];
-  const restoredState = game.restoreMatchFromHistory(record, game.createInitialState());
-
-  assert(record.status === "finished", "the headless ai-vs-ai history record should come from a finished match");
-  assert(restoredState.isMatchStarted === true, "restoring a headless ai-vs-ai record should bring back a live match");
-  assert(game.isHeadlessAiVsAiMode(restoredState) === false, "restored history matches should return in the normal visual presentation mode");
+  assert(restartedState.isMatchStarted === false, "restarting headless ai-vs-ai batch should return to pre-game");
+  assert(restartedState.matchHistory.length === 0, "restarting headless ai-vs-ai batch should not archive the interrupted battery");
+  assert(restartedState.headlessBatchRequestedCount === 4, "restarting after a headless batch should preserve the configured quantity");
 });
 
 test("pause toggle is ignored outside ai vs ai", () => {
@@ -2182,9 +2176,15 @@ test("layout markup removes the cancel button and keeps a pending effect slot", 
   assert(html.includes("id=\"player-2-controller-ai\""), "the config panel should expose a controller toggle for player 2");
   assert(html.includes("id=\"deck-mode-separate\""), "the config panel should expose a separate-deck toggle");
   assert(html.includes("id=\"deck-mode-shared\""), "the config panel should expose a shared-deck toggle");
+  assert(html.includes("id=\"simulate-ai-match-count\""), "the config panel should expose a numeric input for ai-vs-ai batch size");
   assert(html.includes("id=\"start-button\""), "the config panel should expose a Start button for the pre-game");
   assert(html.includes("id=\"simulate-ai-match-button\""), "the config panel should expose a dedicated headless ai-vs-ai button");
   assert(html.includes("id=\"headless-ai-panel\""), "the page should expose a minimal panel for headless ai-vs-ai runs");
+  assert(html.includes("id=\"headless-ai-progress\""), "the headless ai-vs-ai panel should expose a progress counter");
+  assert(html.includes("id=\"headless-ai-player-1-wins\""), "the headless ai-vs-ai panel should expose the first side scoreboard");
+  assert(html.includes("id=\"headless-ai-player-2-wins\""), "the headless ai-vs-ai panel should expose the second side scoreboard");
+  assert(html.includes("id=\"headless-ai-error\""), "the headless ai-vs-ai panel should expose an error slot for failed batches");
+  assert(!html.includes("id=\"headless-ai-log\""), "the headless ai-vs-ai panel should no longer expose a final detailed log container");
   assert(html.includes("id=\"player-1-deck-stat\""), "player panels should expose per-player deck stats");
   assert(html.includes("id=\"player-1-controller-chip\""), "player headers should expose the controller chip for player 1");
   assert(html.includes("id=\"player-2-controller-chip\""), "player headers should expose the controller chip for player 2");
@@ -2210,6 +2210,8 @@ test("layout markup removes the cancel button and keeps a pending effect slot", 
   assert(!html.includes("botao de escudo"), "rules should no longer mention the removed defense button");
   assert(html.includes("IA vs IA"), "rules should describe how to configure ai vs ai");
   assert(html.includes("Simular IA x IA"), "rules should mention the dedicated headless ai-vs-ai simulation flow");
+  assert(html.includes("quantas partidas"), "rules should mention choosing how many ai-vs-ai matches to simulate");
+  assert(html.includes("placar final"), "rules should mention that ai-vs-ai batches end with a final scoreboard");
   assert(html.includes("Validar log"), "rules should mention the manual log validation flow");
   assert(html.includes("Use Historico para revisar partidas encerradas ou abandonadas"), "rules should mention the persistent match history flow");
   assert(!css.includes(".card-defense-toggle"), "styles should no longer keep the removed defense toggle button");
