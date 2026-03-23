@@ -265,6 +265,69 @@
     };
   }
 
+  function isSupportedDeckMode(deckMode) {
+    return deckMode === DECK_MODES.SHARED || deckMode === DECK_MODES.SEPARATE;
+  }
+
+  function isSupportedPlayerController(controller) {
+    return controller === PLAYER_CONTROLLER_TYPES.HUMAN || controller === PLAYER_CONTROLLER_TYPES.AI;
+  }
+
+  function hasSupportedPlayerControllers(controllers) {
+    return Array.isArray(controllers)
+      && controllers.length === 2
+      && controllers.every((controller) => isSupportedPlayerController(controller));
+  }
+
+  function hasValidSnapshotPlayers(players) {
+    return Array.isArray(players)
+      && players.length === 2
+      && players.every((player) => (
+        player
+        && typeof player === "object"
+        && Array.isArray(player.hand)
+        && Array.isArray(player.board)
+        && Array.isArray(player.supportZone)
+      ));
+  }
+
+  function isRestorableSavedMatchSnapshot(snapshot) {
+    if (!snapshot || typeof snapshot !== "object") {
+      return false;
+    }
+
+    if (!Array.isArray(snapshot.deck) || !Array.isArray(snapshot.discardPile)) {
+      return false;
+    }
+
+    if (!Array.isArray(snapshot.playerDecks) || snapshot.playerDecks.length !== 2) {
+      return false;
+    }
+
+    if (!Array.isArray(snapshot.playerDiscardPiles) || snapshot.playerDiscardPiles.length !== 2) {
+      return false;
+    }
+
+    if (!Number.isInteger(snapshot.currentPlayerIndex) || snapshot.currentPlayerIndex < 0 || snapshot.currentPlayerIndex > 1) {
+      return false;
+    }
+
+    if (!isSupportedDeckMode(snapshot.deckMode) || !hasSupportedPlayerControllers(snapshot.playerControllers)) {
+      return false;
+    }
+
+    if (!hasValidSnapshotPlayers(snapshot.players)) {
+      return false;
+    }
+
+    try {
+      const restoredState = restoreStateFromSnapshot(snapshot, []);
+      return Array.isArray(restoredState.players) && restoredState.players.length === 2;
+    } catch (error) {
+      return false;
+    }
+  }
+
   function stripLogSnapshots(entries) {
     return Array.isArray(entries)
       ? entries.map((entry) => ({
@@ -366,9 +429,32 @@
       return null;
     }
 
+    const snapshotControllers = hasSupportedPlayerControllers(record.snapshot?.playerControllers)
+      ? record.snapshot.playerControllers
+      : null;
+    const recordControllers = hasSupportedPlayerControllers(record.playerControllers)
+      ? record.playerControllers
+      : null;
+    const normalizedControllers = recordControllers || snapshotControllers;
+    const snapshotDeckMode = isSupportedDeckMode(record.snapshot?.deckMode)
+      ? record.snapshot.deckMode
+      : null;
+    const recordDeckMode = isSupportedDeckMode(record.deckMode)
+      ? record.deckMode
+      : null;
+    const normalizedDeckMode = recordDeckMode || snapshotDeckMode;
+
+    if (!normalizedControllers || !normalizedDeckMode || !isRestorableSavedMatchSnapshot(record.snapshot)) {
+      return null;
+    }
+
     const initialSnapshot = record.initialSnapshot
       ? cloneData(record.initialSnapshot)
       : (record.log[0]?.snapshot ? cloneData(record.log[0].snapshot) : null);
+    if (initialSnapshot && !isRestorableSavedMatchSnapshot(initialSnapshot)) {
+      return null;
+    }
+
     const normalizedLog = rehydrateSavedMatchLog(record.log, initialSnapshot);
     if (normalizedLog == null) {
       return null;
@@ -383,8 +469,8 @@
       snapshot: cloneData(record.snapshot),
       log: normalizedLog,
       nextLogNumber: Number.isInteger(record.nextLogNumber) ? record.nextLogNumber : (Array.isArray(record.log) ? record.log.length + 1 : 1),
-      playerControllers: normalizePlayerControllers(record.playerControllers),
-      deckMode: normalizeDeckMode(record.deckMode)
+      playerControllers: normalizePlayerControllers(normalizedControllers),
+      deckMode: normalizeDeckMode(normalizedDeckMode)
     };
   }
 
@@ -513,6 +599,10 @@
       return result;
     }
 
+    if (state.historySourceRecordId && !state.hasDivergedFromHistorySource) {
+      return result;
+    }
+
     if (status === "finished" && !state.winner) {
       return result;
     }
@@ -536,6 +626,18 @@
     return result;
   }
 
+  function getSavedMatchPlayers(record) {
+    return Array.isArray(record?.snapshot?.players) ? record.snapshot.players : [];
+  }
+
+  function getSavedMatchWinnerName(record) {
+    if (!record || !Number.isInteger(record.winnerPlayerId)) {
+      return null;
+    }
+
+    return getSavedMatchPlayers(record).find((player) => player.id === record.winnerPlayerId)?.nome || "Vencedor";
+  }
+
   function getSelectedHistoryMatch(state) {
     if (!state || state.selectedHistoryMatchId == null || !Array.isArray(state.matchHistory)) {
       return null;
@@ -549,23 +651,25 @@
       return null;
     }
 
+    const recordLog = Array.isArray(record.log) ? record.log : [];
+
     if (selectedEntryId != null) {
-      const selectedIndex = record.log.findIndex((entry) => entry.id === selectedEntryId);
-      const selectedEntry = selectedIndex === -1 ? null : record.log[selectedIndex];
+      const selectedIndex = recordLog.findIndex((entry) => entry.id === selectedEntryId);
+      const selectedEntry = selectedIndex === -1 ? null : recordLog[selectedIndex];
       if (selectedEntry?.snapshot) {
         return {
           snapshot: selectedEntry.snapshot,
-          log: cloneLogEntries(record.log.slice(0, selectedIndex + 1))
+          log: cloneLogEntries(recordLog.slice(0, selectedIndex + 1))
         };
       }
     }
 
-    for (let index = record.log.length - 1; index >= 0; index -= 1) {
-      const entry = record.log[index];
+    for (let index = recordLog.length - 1; index >= 0; index -= 1) {
+      const entry = recordLog[index];
       if (entry?.snapshot) {
         return {
           snapshot: entry.snapshot,
-          log: cloneLogEntries(record.log.slice(0, index + 1))
+          log: cloneLogEntries(recordLog.slice(0, index + 1))
         };
       }
     }
@@ -573,7 +677,7 @@
     if (record.snapshot) {
       return {
         snapshot: record.snapshot,
-        log: cloneLogEntries(record.log)
+        log: cloneLogEntries(recordLog)
       };
     }
 
@@ -594,6 +698,8 @@
     restoredState.currentMatchId = createUniqueMatchId();
     restoredState.matchHistory = (previousState?.matchHistory || []).map((item) => cloneSavedMatchRecord(item));
     restoredState.hasCurrentMatchBeenSavedToHistory = false;
+    restoredState.historySourceRecordId = record.id;
+    restoredState.hasDivergedFromHistorySource = false;
     restoredState.selectedHistoryMatchId = null;
     restoredState.selectedHistoryLogEntryId = null;
     restoredState.selectedValidationIssueIndex = null;
@@ -636,6 +742,8 @@
       turnNumber: 1,
       nextDefenseOrder: 1,
       currentMatchId: null,
+      historySourceRecordId: null,
+      hasDivergedFromHistorySource: false,
       hasCurrentMatchBeenSavedToHistory: false,
       matchHistory: [],
       log: [],
@@ -740,6 +848,12 @@
     state.selectedValidationIssueIndex = null;
     state.logValidationCopyFeedback = null;
     state.logValidationCopyFeedbackStatus = null;
+  }
+
+  function markHistorySourceDiverged(state) {
+    if (state?.historySourceRecordId) {
+      state.hasDivergedFromHistorySource = true;
+    }
   }
 
   function applyLogValidationResult(state, result) {
@@ -917,6 +1031,7 @@
     });
 
     state.nextLogNumber = entryNumber + 1;
+    markHistorySourceDiverged(state);
     resetLogValidation(state);
   }
 
@@ -949,6 +1064,8 @@
       turnNumber: snapshot.turnNumber,
       nextDefenseOrder: Number.isInteger(snapshot.nextDefenseOrder) ? snapshot.nextDefenseOrder : 1,
       currentMatchId: stateOptions.currentMatchId ?? null,
+      historySourceRecordId: stateOptions.historySourceRecordId ?? null,
+      hasDivergedFromHistorySource: Boolean(stateOptions.hasDivergedFromHistorySource),
       hasCurrentMatchBeenSavedToHistory: Boolean(stateOptions.hasCurrentMatchBeenSavedToHistory),
       matchHistory: (stateOptions.matchHistory || []).map((record) => cloneSavedMatchRecord(record)),
       log: cloneLogEntries(logEntries),
@@ -1929,6 +2046,10 @@
     const keptEntries = state.log.slice(0, targetIndex + 1);
     return restoreStateFromSnapshot(keptEntries[targetIndex].snapshot, keptEntries, {
       currentMatchId: state.currentMatchId,
+      historySourceRecordId: state.historySourceRecordId,
+      hasDivergedFromHistorySource: state.historySourceRecordId
+        ? true
+        : state.hasDivergedFromHistorySource,
       hasCurrentMatchBeenSavedToHistory: state.hasCurrentMatchBeenSavedToHistory,
       matchHistory: state.matchHistory,
       isHistoryOpen: state.isHistoryOpen
@@ -3561,6 +3682,7 @@
     state.selectedAttackerId = null;
     state.selectedEffectCard = null;
     startTurn(state, state.currentPlayerIndex, true);
+    markHistorySourceDiverged(state);
   }
 
   function checkWinner(state) {
@@ -4104,12 +4226,14 @@
       return null;
     }
 
-    return selectedMatch.log.find((entry) => entry.id === state.selectedHistoryLogEntryId) || null;
+    const selectedLog = Array.isArray(selectedMatch.log) ? selectedMatch.log : [];
+    return selectedLog.find((entry) => entry.id === state.selectedHistoryLogEntryId) || null;
   }
 
   function getDefaultHistoryLogEntryId(record) {
-    for (let index = record?.log?.length - 1; index >= 0; index -= 1) {
-      const entry = record.log[index];
+    const recordLog = Array.isArray(record?.log) ? record.log : [];
+    for (let index = recordLog.length - 1; index >= 0; index -= 1) {
+      const entry = recordLog[index];
       if (entry?.snapshot) {
         return entry.id;
       }
@@ -4251,9 +4375,7 @@
     }
 
     state.matchHistory.forEach((record) => {
-      const winnerName = record.winnerPlayerId
-        ? record.snapshot.players.find((player) => player.id === record.winnerPlayerId)?.nome || "Vencedor"
-        : null;
+      const winnerName = getSavedMatchWinnerName(record);
       const item = document.createElement("button");
       item.type = "button";
       item.className = record.id === state.selectedHistoryMatchId
@@ -4278,9 +4400,7 @@
     }
 
     historyDetails.hidden = false;
-    const winnerName = selectedRecord.winnerPlayerId
-      ? selectedRecord.snapshot.players.find((player) => player.id === selectedRecord.winnerPlayerId)?.nome || "Vencedor"
-      : null;
+    const winnerName = getSavedMatchWinnerName(selectedRecord);
     historyTitle.textContent = `${getHistoryStatusLabel(selectedRecord.status)} · ${formatSavedMatchDate(selectedRecord.savedAt)}`;
     historyMeta.textContent = `${selectedRecord.summary} ${winnerName ? `Vencedor: ${winnerName}. ` : ""}${getControllerDisplayLabel(selectedRecord.playerControllers[0])} x ${getControllerDisplayLabel(selectedRecord.playerControllers[1])} · Baralho ${getDeckModeLabel(selectedRecord.deckMode)}.`;
     restoreButton.disabled = !getHistoryRestoreTarget(selectedRecord, state.selectedHistoryLogEntryId);

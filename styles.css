@@ -171,14 +171,15 @@ select {
 }
 
 .match-config-actions {
-  display: flex;
-  align-items: stretch;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-content: start;
   gap: 10px;
-  flex-wrap: wrap;
+  min-width: 0;
 }
 
 .match-config-actions .action-button {
-  min-height: 100%;
+  min-height: 58px;
   padding: 12px 14px;
 }
 
@@ -1466,6 +1467,10 @@ select {
 
   .match-config-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .match-config-actions {
+    grid-column: 1 / -1;
   }
 
   .player-turn-actions-slot {

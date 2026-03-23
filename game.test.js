@@ -271,6 +271,33 @@ test("match history loading tolerates malformed or unavailable storage", () => {
   assert(Array.isArray(malformed) && malformed.length === 0, "history loading should stay safe when persisted data is malformed");
 });
 
+test("match history loading discards parseable records with invalid snapshot structure", () => {
+  const storage = createMemoryStorage();
+  const validState = createStartedState();
+  const validRecord = game.createSavedMatchRecord(validState, "abandoned");
+  const invalidRecord = {
+    id: "broken-record",
+    savedAt: new Date().toISOString(),
+    status: "finished",
+    winnerPlayerId: 1,
+    summary: "registro quebrado",
+    snapshot: {
+      players: [{ id: 1 }]
+    },
+    log: [],
+    nextLogNumber: 1,
+    playerControllers: [game.PLAYER_CONTROLLER_TYPES.HUMAN, game.PLAYER_CONTROLLER_TYPES.AI],
+    deckMode: game.DECK_MODES.SEPARATE
+  };
+
+  storage.setItem(game.MATCH_HISTORY_STORAGE_KEY, JSON.stringify([invalidRecord, validRecord]));
+
+  const loaded = game.loadMatchHistory({ storage });
+
+  assert(loaded.length === 1, "history loading should drop parseable records with invalid match structure");
+  assert(loaded[0].id === validRecord.id, "valid records should still load even when neighbors are invalid");
+});
+
 test("match history persistence stores compact logs and rehydrates snapshots on load", () => {
   const storage = createMemoryStorage();
   const state = createStartedState();
@@ -352,6 +379,8 @@ test("history records can be restored as a live current match", () => {
   assert(restoredState.matchHistory.length === 1, "restoring should keep the historical record available");
   assert(restoredState.hasCurrentMatchBeenSavedToHistory === false, "restored matches should be treated as a fresh live branch");
   assert(restoredState.currentMatchId !== record.id, "restored matches should receive a new live match id");
+  assert(restoredState.historySourceRecordId === record.id, "restored matches should remember which history record they came from");
+  assert(restoredState.hasDivergedFromHistorySource === false, "restored matches should start as unchanged history views");
   assert(restoredState.selectedHistoryMatchId === null && restoredState.selectedHistoryLogEntryId === null, "restoring should clear history selections");
 });
 
@@ -408,6 +437,89 @@ test("finished history records default to the final log entry and restore the fu
   assert(restoredState.log.length === finishedRecord.log.length, "restoring the final line should keep the full match log");
   assert(restoredState.winner && restoredState.winner.id === finishedRecord.winnerPlayerId, "restoring the final line should keep the winner");
   assert(restoredState.isWinnerModalOpen === true, "restoring the final line should reopen the winner modal state");
+});
+
+test("restoring a finished history record and leaving without changes does not duplicate it", () => {
+  const storage = createMemoryStorage();
+  const winningState = createStartedState();
+  winningState.players[1].vida = 2;
+  winningState.players[0].manaAtual = 1;
+  winningState.players[0].manaMax = 1;
+  Object.assign(winningState.players[0].hand[0], {
+    id: "atk",
+    nome: "Finalizador",
+    categoria: "unidade",
+    efeito: null,
+    custo: 1,
+    ataque: 4,
+    vida: 3,
+    vidaBase: 3,
+    descricao: ""
+  });
+
+  const attackerInstanceId = winningState.players[0].hand[0].instanceId;
+  winningState.log[0].snapshot = snapshotStateForValidation(winningState);
+  game.playCard(winningState, 0, attackerInstanceId);
+  game.selectAttacker(winningState, 0, attackerInstanceId);
+  game.attackTarget(winningState, 0, "player", undefined, { storage });
+
+  const pregameState = game.createInitialState();
+  pregameState.matchHistory = game.loadMatchHistory({ storage });
+  const selectedRecord = game.selectHistoryMatch(pregameState, pregameState.matchHistory[0].id);
+  const restoredState = game.restoreMatchFromHistory(selectedRecord, pregameState, { storage });
+  const restartedState = game.createRestartState(restoredState, { storage });
+
+  assert(restartedState.matchHistory.length === 1, "leaving a restored finished match unchanged should not create a duplicate history entry");
+  assert(JSON.parse(storage.getItem(game.MATCH_HISTORY_STORAGE_KEY)).length === 1, "unchanged restored finished matches should not duplicate persisted history");
+});
+
+test("restoring an abandoned history record and leaving without changes does not duplicate it", () => {
+  const storage = createMemoryStorage();
+  const sourceState = createStartedState();
+  game.archiveCurrentMatchIfNeeded(sourceState, "abandoned", { storage });
+
+  const pregameState = game.createInitialState();
+  pregameState.matchHistory = game.loadMatchHistory({ storage });
+  const selectedRecord = game.selectHistoryMatch(pregameState, pregameState.matchHistory[0].id);
+  const restoredState = game.restoreMatchFromHistory(selectedRecord, pregameState, { storage });
+  const restartedState = game.createRestartState(restoredState, { storage });
+
+  assert(restartedState.matchHistory.length === 1, "leaving a restored abandoned match unchanged should not create a duplicate history entry");
+  assert(JSON.parse(storage.getItem(game.MATCH_HISTORY_STORAGE_KEY)).length === 1, "unchanged restored abandoned matches should not duplicate persisted history");
+});
+
+test("restoring a history record and rewinding it creates a new derived archive", () => {
+  const storage = createMemoryStorage();
+  const sourceState = createStartedState();
+  sourceState.players[0].manaAtual = 1;
+  sourceState.players[0].manaMax = 1;
+  Object.assign(sourceState.players[0].hand[0], {
+    id: "u-1",
+    nome: "Batedora",
+    categoria: "unidade",
+    efeito: null,
+    custo: 1,
+    ataque: 2,
+    vida: 2,
+    vidaBase: 2,
+    descricao: ""
+  });
+
+  const playedCardId = sourceState.players[0].hand[0].instanceId;
+  sourceState.log[0].snapshot = snapshotStateForValidation(sourceState);
+  game.playCard(sourceState, 0, playedCardId);
+  game.archiveCurrentMatchIfNeeded(sourceState, "abandoned", { storage });
+
+  const pregameState = game.createInitialState();
+  pregameState.matchHistory = game.loadMatchHistory({ storage });
+  const selectedRecord = game.selectHistoryMatch(pregameState, pregameState.matchHistory[0].id);
+  const restoredState = game.restoreMatchFromHistory(selectedRecord, pregameState, { storage });
+  const rewoundState = game.rewindToLogEntry(restoredState, 1);
+  const restartedState = game.createRestartState(rewoundState, { storage });
+
+  assert(rewoundState.hasDivergedFromHistorySource === true, "rewinding a restored history match should mark it as a divergent branch");
+  assert(restartedState.matchHistory.length === 2, "leaving a diverged restored match should create a new derived history record");
+  assert(restartedState.matchHistory.some((record) => record.id === rewoundState.currentMatchId), "the derived rewind branch should be archived under the live restored match id");
 });
 
 test("failing to persist the history keeps the record in memory, allows retry, and does not mark it as saved", () => {
@@ -2046,6 +2158,7 @@ test("canceling prepared direct damage refunds mana and returns the card to hand
 
 test("layout markup removes the cancel button and keeps a pending effect slot", () => {
   const html = fs.readFileSync(path.join(process.cwd(), "index.html"), "utf8");
+  const css = fs.readFileSync(path.join(process.cwd(), "styles.css"), "utf8");
 
   assert(!html.includes("cancel-attack-button"), "cancel button should be removed from the markup");
   assert(html.includes("player-1-pending-slot"), "active player area should expose a pending effect slot");
@@ -2062,7 +2175,8 @@ test("layout markup removes the cancel button and keeps a pending effect slot", 
   assert(!html.includes("id=\"rewind-history-button\""), "history mode should no longer render a dedicated rewind button");
   assert(!html.includes("id=\"game-mode-select\""), "the old shared mode selector should be removed");
   assert(html.includes("id=\"match-config-panel\""), "the page should render a dedicated pre-game configuration panel");
-  assert(fs.readFileSync(path.join(process.cwd(), "styles.css"), "utf8").includes(".match-config-panel[hidden]"), "pregame panel should have an explicit hidden style hook");
+  assert(css.includes(".match-config-panel[hidden]"), "pregame panel should have an explicit hidden style hook");
+  assert(!css.includes("min-height: 100%"), "pregame actions should no longer stretch buttons in a way that can overflow the panel");
   assert(html.indexOf("id=\"match-config-panel\"") < html.indexOf("id=\"ai-match-strip\""), "ai-vs-ai strip should come after the pre-game config panel in the markup");
   assert(html.includes("id=\"player-1-controller-human\""), "the config panel should expose a controller toggle for player 1");
   assert(html.includes("id=\"player-2-controller-ai\""), "the config panel should expose a controller toggle for player 2");
@@ -2098,7 +2212,7 @@ test("layout markup removes the cancel button and keeps a pending effect slot", 
   assert(html.includes("Simular IA x IA"), "rules should mention the dedicated headless ai-vs-ai simulation flow");
   assert(html.includes("Validar log"), "rules should mention the manual log validation flow");
   assert(html.includes("Use Historico para revisar partidas encerradas ou abandonadas"), "rules should mention the persistent match history flow");
-  assert(!fs.readFileSync(path.join(process.cwd(), "styles.css"), "utf8").includes(".card-defense-toggle"), "styles should no longer keep the removed defense toggle button");
+  assert(!css.includes(".card-defense-toggle"), "styles should no longer keep the removed defense toggle button");
 });
 
 test("estandarte de guerra now costs 5 mana", () => {
