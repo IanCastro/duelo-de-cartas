@@ -271,6 +271,25 @@ test("match history loading tolerates malformed or unavailable storage", () => {
   assert(Array.isArray(malformed) && malformed.length === 0, "history loading should stay safe when persisted data is malformed");
 });
 
+test("match history persistence stores compact logs and rehydrates snapshots on load", () => {
+  const storage = createMemoryStorage();
+  const state = createStartedState();
+  game.drawTurnCard(state, 0);
+
+  const archiveResult = game.archiveCurrentMatchIfNeeded(state, "abandoned", { storage });
+  const persistedRaw = storage.getItem(game.MATCH_HISTORY_STORAGE_KEY);
+  const persistedRecords = JSON.parse(persistedRaw);
+  const loadedRecords = game.loadMatchHistory({ storage });
+
+  assert(archiveResult.persisted === true, "archiving to a working storage backend should report successful persistence");
+  assert(persistedRecords.length === 1, "the persisted history should contain the archived match");
+  assert(!Object.prototype.hasOwnProperty.call(persistedRecords[0].log[0], "snapshot"), "persisted log entries should omit per-entry snapshots");
+  assert(Boolean(persistedRecords[0].initialSnapshot), "persisted history should keep the initial snapshot needed for rehydration");
+  assert(persistedRaw.length < JSON.stringify(state.matchHistory).length, "the persisted payload should be smaller than the in-memory history shape");
+  assert(Boolean(loadedRecords[0].log[0].snapshot), "loaded compact history should rebuild the first snapshot");
+  assert(Boolean(loadedRecords[0].log[loadedRecords[0].log.length - 1].snapshot), "loaded compact history should rebuild the later snapshots");
+});
+
 test("createRestartState archives an in-progress match as abandoned", () => {
   const storage = createMemoryStorage();
   const previousState = createStartedState();

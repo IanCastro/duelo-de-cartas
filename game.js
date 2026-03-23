@@ -265,8 +265,112 @@
     };
   }
 
+  function stripLogSnapshots(entries) {
+    return Array.isArray(entries)
+      ? entries.map((entry) => ({
+        id: entry.id,
+        numero: entry.numero,
+        texto: entry.texto,
+        event: cloneData(entry.event)
+      }))
+      : [];
+  }
+
+  function rehydrateSavedMatchLog(logEntries, initialSnapshot) {
+    if (!Array.isArray(logEntries) || !logEntries.length) {
+      return [];
+    }
+
+    if (logEntries.every((entry) => entry?.snapshot)) {
+      return cloneLogEntries(logEntries);
+    }
+
+    if (!initialSnapshot) {
+      return null;
+    }
+
+    const hydratedEntries = logEntries.map((entry) => ({
+      id: entry.id,
+      numero: entry.numero,
+      texto: entry.texto,
+      event: cloneData(entry.event),
+      snapshot: null
+    }));
+    hydratedEntries[0].snapshot = cloneData(initialSnapshot);
+
+    for (let entryIndex = 1; entryIndex < hydratedEntries.length; entryIndex += 1) {
+      const entry = hydratedEntries[entryIndex];
+      const previousEntry = hydratedEntries[entryIndex - 1];
+      if (!previousEntry?.snapshot || !entry?.event) {
+        return null;
+      }
+
+      let workingState = createReplayStateFromSnapshot(previousEntry.snapshot);
+      let rebuiltSnapshot = null;
+      const maxSilentTransitions = 32;
+
+      for (let silentTransitions = 0; silentTransitions <= maxSilentTransitions; silentTransitions += 1) {
+        if (silentTransitions > 0) {
+          const advanced = applySilentReplayTurnTransition(
+            workingState,
+            silentTransitions === 1 ? previousEntry?.event?.kind : null
+          );
+          if (!advanced) {
+            break;
+          }
+        }
+
+        const attemptState = createReplayStateFromSnapshot(createStateSnapshot(workingState));
+        const applyResult = applyLoggedEvent(attemptState, entry.event);
+        if (!applyResult.ok) {
+          continue;
+        }
+
+        rebuiltSnapshot = createStateSnapshot(attemptState);
+        break;
+      }
+
+      if (!rebuiltSnapshot) {
+        return null;
+      }
+
+      entry.snapshot = rebuiltSnapshot;
+    }
+
+    return hydratedEntries;
+  }
+
+  function createPersistedMatchRecord(record) {
+    const normalizedRecord = normalizeSavedMatchRecord(record);
+    if (!normalizedRecord) {
+      return null;
+    }
+
+    return {
+      id: normalizedRecord.id,
+      savedAt: normalizedRecord.savedAt,
+      status: normalizedRecord.status,
+      winnerPlayerId: normalizedRecord.winnerPlayerId,
+      summary: normalizedRecord.summary,
+      snapshot: cloneData(normalizedRecord.snapshot),
+      initialSnapshot: normalizedRecord.log[0]?.snapshot ? cloneData(normalizedRecord.log[0].snapshot) : null,
+      log: stripLogSnapshots(normalizedRecord.log),
+      nextLogNumber: normalizedRecord.nextLogNumber,
+      playerControllers: normalizePlayerControllers(normalizedRecord.playerControllers),
+      deckMode: normalizeDeckMode(normalizedRecord.deckMode)
+    };
+  }
+
   function normalizeSavedMatchRecord(record) {
     if (!record || typeof record !== "object" || !record.snapshot || !Array.isArray(record.log)) {
+      return null;
+    }
+
+    const initialSnapshot = record.initialSnapshot
+      ? cloneData(record.initialSnapshot)
+      : (record.log[0]?.snapshot ? cloneData(record.log[0].snapshot) : null);
+    const normalizedLog = rehydrateSavedMatchLog(record.log, initialSnapshot);
+    if (normalizedLog == null) {
       return null;
     }
 
@@ -277,7 +381,7 @@
       winnerPlayerId: Number.isInteger(record.winnerPlayerId) ? record.winnerPlayerId : null,
       summary: typeof record.summary === "string" ? record.summary : "",
       snapshot: cloneData(record.snapshot),
-      log: cloneLogEntries(record.log),
+      log: normalizedLog,
       nextLogNumber: Number.isInteger(record.nextLogNumber) ? record.nextLogNumber : (Array.isArray(record.log) ? record.log.length + 1 : 1),
       playerControllers: normalizePlayerControllers(record.playerControllers),
       deckMode: normalizeDeckMode(record.deckMode)
@@ -329,7 +433,7 @@
   function saveMatchHistory(records, options = {}) {
     const normalizedRecords = Array.isArray(records)
       ? records
-        .map((record) => normalizeSavedMatchRecord(record))
+        .map((record) => createPersistedMatchRecord(record))
         .filter(Boolean)
         .slice(0, MAX_SAVED_MATCHES)
       : [];
