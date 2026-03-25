@@ -110,6 +110,14 @@ function createFailingStorage() {
   };
 }
 
+function createSeededRng(seed) {
+  let current = seed >>> 0;
+  return () => {
+    current = ((current * 1664525) + 1013904223) >>> 0;
+    return current / 4294967296;
+  };
+}
+
 test("initial state opens in pre-game with default player controllers", () => {
   const state = game.createInitialState();
 
@@ -164,6 +172,25 @@ test("session player controllers control how new matches start", () => {
     const aiMatch = game.createInitialState();
     assert(aiMatch.playerControllers[0] === game.PLAYER_CONTROLLER_TYPES.HUMAN, "changing the session player 1 selection should affect the next new match");
     assert(aiMatch.playerControllers[1] === game.PLAYER_CONTROLLER_TYPES.AI, "changing the session player 2 selection should affect the next new match");
+  } finally {
+    game.setSessionPlayerController(0, previousControllers[0]);
+    game.setSessionPlayerController(1, previousControllers[1]);
+  }
+});
+
+test("legacy ai controller values normalize to ai_base without losing ai control", () => {
+  const previousControllers = game.getSessionPlayerControllers();
+
+  try {
+    game.setSessionPlayerController(0, game.PLAYER_CONTROLLER_TYPES.HUMAN);
+    game.setSessionPlayerController(1, "ai");
+    const state = game.createInitialState();
+    const startedState = game.startConfiguredMatch(state);
+
+    assert(state.playerControllers[1] === game.PLAYER_CONTROLLER_TYPES.AI_BASE, "legacy ai values should normalize to ai_base in pre-game state");
+    assert(startedState.playerControllers[1] === game.PLAYER_CONTROLLER_TYPES.AI_BASE, "started matches should also carry ai_base for the legacy ai value");
+    assert(game.getAiControllerForPlayer(startedState, 1) === game.PLAYER_CONTROLLER_TYPES.AI_BASE, "ai helper should expose the normalized ai_base profile");
+    assert(game.isAiControlledPlayer(startedState, 1) === true, "normalized ai_base should still count as ai-controlled");
   } finally {
     game.setSessionPlayerController(0, previousControllers[0]);
     game.setSessionPlayerController(1, previousControllers[1]);
@@ -1128,6 +1155,15 @@ test("deck size grows with 4 copies of each card", () => {
   assert(deck.length === game.getTotalDeckSize(), "deck size helper should match the real deck size");
 });
 
+test("shuffleDeck can be made deterministic with a seeded rng", () => {
+  const firstOrder = game.shuffleDeck(game.createDeck(), createSeededRng(12345)).map((card) => card.instanceId).join("|");
+  const secondOrder = game.shuffleDeck(game.createDeck(), createSeededRng(12345)).map((card) => card.instanceId).join("|");
+  const differentOrder = game.shuffleDeck(game.createDeck(), createSeededRng(67890)).map((card) => card.instanceId).join("|");
+
+  assert(firstOrder === secondOrder, "the same seed should reproduce the same deck order");
+  assert(firstOrder !== differentOrder, "different seeds should produce a different deck order");
+});
+
 test("deck card counts report how many copies remain in the baralho", () => {
   const counts = game.getDeckCardCounts([
     { id: "unit-1" },
@@ -1171,6 +1207,50 @@ test("ai helper follows the configured controller on each seat", () => {
   state.playerControllers = [game.PLAYER_CONTROLLER_TYPES.HUMAN, game.PLAYER_CONTROLLER_TYPES.HUMAN];
   assert(game.isAiEnabled(state) === false, "human vs human should disable the ai");
   assert(game.isAiControlledPlayer(state, 1) === false, "player 2 should stop being ai-controlled in human mode");
+});
+
+test("base ai helper stays aligned with the default ai dispatcher", () => {
+  const state = createStartedState();
+  state.currentPlayerIndex = 1;
+  state.playerControllers = [game.PLAYER_CONTROLLER_TYPES.HUMAN, game.PLAYER_CONTROLLER_TYPES.AI_BASE];
+  state.players[1].board = [{
+    id: "ai-attacker",
+    instanceId: "ai-attacker",
+    nome: "Guardiao de Ferro",
+    categoria: "unidade",
+    custo: 4,
+    ataque: 2,
+    vida: 8,
+    vidaBase: 8,
+    descricao: "",
+    estado: "campo",
+    podeAgir: true,
+    jaAtacouNoTurno: false
+  }];
+  state.players[0].board = [{
+    id: "enemy-threat",
+    instanceId: "enemy-threat",
+    nome: "Arqueira Nebulosa",
+    categoria: "unidade",
+    custo: 3,
+    ataque: 3,
+    vida: 2,
+    vidaBase: 3,
+    descricao: "",
+    estado: "campo",
+    podeAgir: true,
+    jaAtacouNoTurno: false
+  }];
+
+  const baseAction = game.getNextBaseAiAction(state);
+  const dispatchedAction = game.getNextAiActionForController(state, game.PLAYER_CONTROLLER_TYPES.AI_BASE);
+  const defaultAction = game.getNextAiAction(state);
+
+  assert(baseAction?.type === "attack-unit", "the base ai helper should preserve the current tactical priority");
+  assert(dispatchedAction?.type === baseAction?.type, "dispatching ai_base should reuse the same action type");
+  assert(dispatchedAction?.targetInstanceId === baseAction?.targetInstanceId, "dispatching ai_base should preserve the same target");
+  assert(defaultAction?.type === baseAction?.type, "the default ai dispatcher should stay aligned with ai_base");
+  assert(defaultAction?.targetInstanceId === baseAction?.targetInstanceId, "the default dispatcher should preserve the ai_base target");
 });
 
 test("ai action helper prioritizes killing an enemy unit before attacking the player", () => {
@@ -1551,6 +1631,56 @@ test("selected unit can defend the own hero through the header target", () => {
   assert(state.players[0].board[0].isDefending === true, "unit should enter defense mode for the hero");
   assert(state.players[0].board[0].defendingTargetType === "player", "hero defense should record the player target");
   assert(state.players[0].board[0].defendingTargetPlayerIndex === 0, "hero defense should point at the owner's hero");
+});
+
+test("clicking another allied unit while a defender is selected protects it instead of changing the selection", () => {
+  const state = createStartedState();
+  state.players[0].board = [{
+    id: "guard",
+    instanceId: "guard",
+    nome: "Guardiao",
+    categoria: "unidade",
+    custo: 4,
+    ataque: 2,
+    vida: 8,
+    vidaBase: 8,
+    descricao: "",
+    estado: "campo",
+    podeAgir: true,
+    jaAtacouNoTurno: false,
+    isDefending: false,
+    defendingTargetType: null,
+    defendingTargetPlayerIndex: null,
+    defendingTargetInstanceId: null,
+    defenseOrder: null
+  }, {
+    id: "ally",
+    instanceId: "ally",
+    nome: "Aliada",
+    categoria: "unidade",
+    custo: 2,
+    ataque: 2,
+    vida: 5,
+    vidaBase: 5,
+    descricao: "",
+    estado: "campo",
+    podeAgir: true,
+    jaAtacouNoTurno: false,
+    isDefending: false,
+    defendingTargetType: null,
+    defendingTargetPlayerIndex: null,
+    defendingTargetInstanceId: null,
+    defenseOrder: null
+  }];
+
+  const selected = game.selectAttacker(state, 0, "guard");
+  const clicked = game.handleBoardUnitClick(state, game.getRenderedGameState(state), 0, "ally");
+
+  assert(selected === true, "the guard should become selected before choosing the defense target");
+  assert(clicked === true, "clicking the allied unit should resolve as a defense action");
+  assert(state.players[0].board[0].isDefending === true, "the original selected unit should enter defense mode");
+  assert(state.players[0].board[0].defendingTargetInstanceId === "ally", "the selected unit should protect the clicked ally");
+  assert(state.selectedAttackerId === null, "the click should resolve the defense instead of moving the selection to the ally");
 });
 
 test("protected units cannot be attacked directly while the defender remains attackable", () => {
@@ -2430,6 +2560,43 @@ test("available actions report no actions when mana, cards, and attacks are exha
   assert(available.hasAny === false, "player should have no actions left in this exhausted state");
 });
 
+test("available actions ignore a passive hero defender when nothing else is left to do", () => {
+  const state = createStartedState();
+  state.deck = [];
+  state.players[0].manaAtual = 0;
+  state.players[0].manaMax = 0;
+  state.players[0].hand = [];
+  state.players[0].board = [{
+    id: "guard",
+    instanceId: "guard",
+    nome: "Guardiao",
+    categoria: "unidade",
+    custo: 4,
+    ataque: 2,
+    vida: 8,
+    vidaBase: 8,
+    descricao: "",
+    estado: "campo",
+    podeAgir: true,
+    jaAtacouNoTurno: false,
+    isDefending: false,
+    defendingTargetType: null,
+    defendingTargetPlayerIndex: null,
+    defendingTargetInstanceId: null,
+    defenseOrder: null
+  }];
+
+  game.selectAttacker(state, 0, "guard");
+  const defended = game.resolvePlayerHeaderTarget(state, 0);
+  const available = game.getAvailableActions(state, 0);
+
+  assert(defended === true, "hero defense should still be assignable");
+  assert(state.players[0].board[0].isDefending === true, "guard should stay defending the hero");
+  assert(available.defenseMovers === 1, "the helper can still report a defending unit for diagnostics");
+  assert(available.pendingSelection === false, "the defense assignment should resolve the pending selection");
+  assert(available.hasAny === false, "a passive defender alone should not count as an action still pending");
+});
+
 test("attempting to end turn with available actions depends on confirmation", () => {
   const state = createStartedState();
   let confirmCalls = 0;
@@ -2464,6 +2631,48 @@ test("ending turn without actions left should not ask for confirmation", () => {
   assert(ended === true, "turn should end immediately when no actions remain");
   assert(confirmCalls === 0, "no confirmation should be requested with no actions left");
   assert(state.currentPlayerIndex === 1, "turn should pass to the next player");
+});
+
+test("ending turn after assigning hero defense should not ask for confirmation when no other actions remain", () => {
+  const state = createStartedState();
+  state.deck = [];
+  state.players[0].manaAtual = 0;
+  state.players[0].manaMax = 0;
+  state.players[0].hand = [];
+  state.players[0].board = [{
+    id: "guard",
+    instanceId: "guard",
+    nome: "Guardiao",
+    categoria: "unidade",
+    custo: 4,
+    ataque: 2,
+    vida: 8,
+    vidaBase: 8,
+    descricao: "",
+    estado: "campo",
+    podeAgir: true,
+    jaAtacouNoTurno: false,
+    isDefending: false,
+    defendingTargetType: null,
+    defendingTargetPlayerIndex: null,
+    defendingTargetInstanceId: null,
+    defenseOrder: null
+  }];
+  let confirmCalls = 0;
+
+  game.selectAttacker(state, 0, "guard");
+  const defended = game.resolvePlayerHeaderTarget(state, 0);
+  const ended = game.attemptEndTurn(state, {
+    confirmFn: () => {
+      confirmCalls += 1;
+      return true;
+    }
+  });
+
+  assert(defended === true, "hero defense should be assigned before the turn-end attempt");
+  assert(ended === true, "turn should end once the hero defense is set and no other actions remain");
+  assert(confirmCalls === 0, "ending the turn should not ask for confirmation just because a defender is active");
+  assert(state.currentPlayerIndex === 1, "turn should pass normally to the next player");
 });
 
 test("ending turn with an armed effect should not lose the card", () => {

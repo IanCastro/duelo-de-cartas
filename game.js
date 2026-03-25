@@ -29,7 +29,13 @@
   });
   const PLAYER_CONTROLLER_TYPES = Object.freeze({
     HUMAN: "human",
-    AI: "ai"
+    AI: "ai_base",
+    AI_BASE: "ai_base",
+    AI_SMART: "ai_smart"
+  });
+  const HEADLESS_BATCH_MODES = Object.freeze({
+    SIMPLE: "simple",
+    MIRRORED_COMPARE: "mirrored-compare"
   });
   const LOG_VALIDATION_STATUS = Object.freeze({
     IDLE: "idle",
@@ -54,7 +60,7 @@
     VICTORY: "victory"
   });
 
-  let sessionPlayerControllers = [PLAYER_CONTROLLER_TYPES.HUMAN, PLAYER_CONTROLLER_TYPES.AI];
+  let sessionPlayerControllers = [PLAYER_CONTROLLER_TYPES.HUMAN, PLAYER_CONTROLLER_TYPES.AI_BASE];
   let sessionDeckMode = DECK_MODES.SEPARATE;
   let aiTurnTimerId = null;
   let headlessSimulationTimerId = null;
@@ -168,11 +174,11 @@
     return CARD_LIBRARY.flatMap((card) => suffixes.map((suffix) => instantiateCard(card, suffix, prefix)));
   }
 
-  function shuffleDeck(cards) {
+  function shuffleDeck(cards, rng = Math.random) {
     const deck = [...cards];
 
     for (let index = deck.length - 1; index > 0; index -= 1) {
-      const randomIndex = Math.floor(Math.random() * (index + 1));
+      const randomIndex = Math.floor(rng() * (index + 1));
       [deck[index], deck[randomIndex]] = [deck[randomIndex], deck[index]];
     }
 
@@ -180,7 +186,15 @@
   }
 
   function normalizePlayerController(controller) {
-    return controller === PLAYER_CONTROLLER_TYPES.AI ? PLAYER_CONTROLLER_TYPES.AI : PLAYER_CONTROLLER_TYPES.HUMAN;
+    if (controller === "ai" || controller === PLAYER_CONTROLLER_TYPES.AI || controller === PLAYER_CONTROLLER_TYPES.AI_BASE) {
+      return PLAYER_CONTROLLER_TYPES.AI_BASE;
+    }
+
+    if (controller === PLAYER_CONTROLLER_TYPES.AI_SMART) {
+      return PLAYER_CONTROLLER_TYPES.AI_SMART;
+    }
+
+    return PLAYER_CONTROLLER_TYPES.HUMAN;
   }
 
   function normalizePlayerControllers(controllers) {
@@ -192,7 +206,13 @@
   }
 
   function getControllerDisplayLabel(controller) {
-    return normalizePlayerController(controller) === PLAYER_CONTROLLER_TYPES.AI ? "IA" : "Humano";
+    return normalizePlayerController(controller) === PLAYER_CONTROLLER_TYPES.HUMAN ? "Humano" : "IA";
+  }
+
+  function isAiControllerType(controller) {
+    const normalizedController = normalizePlayerController(controller);
+    return normalizedController === PLAYER_CONTROLLER_TYPES.AI_BASE
+      || normalizedController === PLAYER_CONTROLLER_TYPES.AI_SMART;
   }
 
   function getSessionPlayerControllers() {
@@ -292,7 +312,10 @@
   }
 
   function isSupportedPlayerController(controller) {
-    return controller === PLAYER_CONTROLLER_TYPES.HUMAN || controller === PLAYER_CONTROLLER_TYPES.AI;
+    return controller === "ai"
+      || controller === PLAYER_CONTROLLER_TYPES.HUMAN
+      || controller === PLAYER_CONTROLLER_TYPES.AI_BASE
+      || controller === PLAYER_CONTROLLER_TYPES.AI_SMART;
   }
 
   function hasSupportedPlayerControllers(controllers) {
@@ -750,11 +773,19 @@
       headlessBatchRequestedCount: HEADLESS_AI_BATCH_DEFAULT_MATCHES,
       headlessBatchCompletedCount: 0,
       headlessBatchWins: [0, 0],
+      headlessBatchControllerWins: {
+        [PLAYER_CONTROLLER_TYPES.AI_BASE]: 0,
+        [PLAYER_CONTROLLER_TYPES.AI_SMART]: 0
+      },
+      headlessBatchSeatWins: [0, 0],
+      headlessBatchMode: HEADLESS_BATCH_MODES.SIMPLE,
+      headlessBatchPairCountRequested: 0,
       headlessBatchCurrentMatchNumber: 0,
       headlessBatchCurrentMatchActionCount: 0,
       headlessBatchStatus: HEADLESS_BATCH_STATUSES.IDLE,
       headlessBatchErrorMessage: null,
       headlessBatchMatchState: null,
+      headlessBatchRandomFn: null,
       isHeadlessBatchInternal: false,
       suppressValidationAlerts: false,
       isAiVsAiPaused: false,
@@ -793,8 +824,9 @@
     };
   }
 
-  function startConfiguredMatch(previousState) {
+  function startConfiguredMatch(previousState, options = {}) {
     const nextState = createInitialState();
+    const rng = typeof options.rng === "function" ? options.rng : Math.random;
     const preservedControllers = setSessionPlayerControllers(previousState?.playerControllers);
     nextState.playerControllers = preservedControllers;
     nextState.deckMode = setSessionDeckMode(previousState?.deckMode);
@@ -810,7 +842,7 @@
     nextState.isHeadlessSimulationRunning = false;
 
     if (nextState.deckMode === DECK_MODES.SHARED) {
-      nextState.deck = shuffleDeck(createDeck());
+      nextState.deck = shuffleDeck(createDeck(), rng);
       nextState.discardPile = [];
       nextState.playerDecks = [[], []];
       nextState.playerDiscardPiles = [[], []];
@@ -818,8 +850,8 @@
       nextState.deck = [];
       nextState.discardPile = [];
       nextState.playerDecks = [
-        shuffleDeck(createDeck(SEPARATE_DECK_COPIES_PER_TYPE, "p1")),
-        shuffleDeck(createDeck(SEPARATE_DECK_COPIES_PER_TYPE, "p2"))
+        shuffleDeck(createDeck(SEPARATE_DECK_COPIES_PER_TYPE, "p1"), rng),
+        shuffleDeck(createDeck(SEPARATE_DECK_COPIES_PER_TYPE, "p2"), rng)
       ];
       nextState.playerDiscardPiles = [[], []];
     }
@@ -1084,11 +1116,19 @@
       headlessBatchRequestedCount: HEADLESS_AI_BATCH_DEFAULT_MATCHES,
       headlessBatchCompletedCount: 0,
       headlessBatchWins: [0, 0],
+      headlessBatchControllerWins: {
+        [PLAYER_CONTROLLER_TYPES.AI_BASE]: 0,
+        [PLAYER_CONTROLLER_TYPES.AI_SMART]: 0
+      },
+      headlessBatchSeatWins: [0, 0],
+      headlessBatchMode: HEADLESS_BATCH_MODES.SIMPLE,
+      headlessBatchPairCountRequested: 0,
       headlessBatchCurrentMatchNumber: 0,
       headlessBatchCurrentMatchActionCount: 0,
       headlessBatchStatus: HEADLESS_BATCH_STATUSES.IDLE,
       headlessBatchErrorMessage: null,
       headlessBatchMatchState: null,
+      headlessBatchRandomFn: null,
       isHeadlessBatchInternal: false,
       suppressValidationAlerts: false,
       isAiVsAiPaused: false,
@@ -2162,8 +2202,16 @@
     return Boolean(
       state
       && Array.isArray(state.playerControllers)
-      && state.playerControllers.some((controller) => normalizePlayerController(controller) === PLAYER_CONTROLLER_TYPES.AI)
+      && state.playerControllers.some((controller) => isAiControllerType(controller))
     );
+  }
+
+  function getAiControllerForPlayer(state, playerIndex) {
+    if (!state || (playerIndex !== 0 && playerIndex !== 1)) {
+      return PLAYER_CONTROLLER_TYPES.HUMAN;
+    }
+
+    return normalizePlayerController(normalizePlayerControllers(state?.playerControllers)[playerIndex]);
   }
 
   function isAiControlledPlayer(state, playerIndex) {
@@ -2171,8 +2219,7 @@
       return false;
     }
 
-    const controllers = normalizePlayerControllers(state?.playerControllers);
-    return controllers[playerIndex] === PLAYER_CONTROLLER_TYPES.AI;
+    return isAiControllerType(getAiControllerForPlayer(state, playerIndex));
   }
 
   function isAiVsAiMatch(state) {
@@ -2261,11 +2308,19 @@
     state.isHeadlessSimulationRunning = false;
     state.headlessBatchCompletedCount = 0;
     state.headlessBatchWins = [0, 0];
+    state.headlessBatchControllerWins = {
+      [PLAYER_CONTROLLER_TYPES.AI_BASE]: 0,
+      [PLAYER_CONTROLLER_TYPES.AI_SMART]: 0
+    };
+    state.headlessBatchSeatWins = [0, 0];
+    state.headlessBatchMode = HEADLESS_BATCH_MODES.SIMPLE;
+    state.headlessBatchPairCountRequested = 0;
     state.headlessBatchCurrentMatchNumber = 0;
     state.headlessBatchCurrentMatchActionCount = 0;
     state.headlessBatchStatus = HEADLESS_BATCH_STATUSES.IDLE;
     state.headlessBatchErrorMessage = null;
     state.headlessBatchMatchState = null;
+    state.headlessBatchRandomFn = null;
   }
 
   function createHeadlessBatchMatchState(state) {
@@ -2273,7 +2328,9 @@
     pregameState.playerControllers = normalizePlayerControllers(state.playerControllers);
     pregameState.deckMode = normalizeDeckMode(state.deckMode);
 
-    const matchState = startConfiguredMatch(pregameState);
+    const matchState = startConfiguredMatch(pregameState, {
+      rng: typeof state?.headlessBatchRandomFn === "function" ? state.headlessBatchRandomFn : Math.random
+    });
     matchState.matchHistory = [];
     matchState.currentMatchId = null;
     matchState.hasCurrentMatchBeenSavedToHistory = false;
@@ -2340,7 +2397,7 @@
     return true;
   }
 
-  function startHeadlessAiBatch(previousState, requestedCount = previousState?.headlessBatchRequestedCount) {
+  function startHeadlessAiBatch(previousState, requestedCount = previousState?.headlessBatchRequestedCount, options = {}) {
     if (!isAiControlledPlayer(previousState, 0) || !isAiControlledPlayer(previousState, 1)) {
       return startConfiguredMatch(previousState);
     }
@@ -2349,6 +2406,7 @@
     nextState.playerControllers = setSessionPlayerControllers(previousState?.playerControllers);
     nextState.deckMode = setSessionDeckMode(previousState?.deckMode);
     nextState.headlessBatchRequestedCount = normalizeHeadlessBatchCount(requestedCount);
+    nextState.headlessBatchPairCountRequested = 0;
     nextState.matchHistory = (previousState?.matchHistory || []).map((record) => cloneSavedMatchRecord(record));
     nextState.currentMatchId = createUniqueMatchId();
     nextState.isMatchStarted = true;
@@ -2361,6 +2419,15 @@
     nextState.headlessBatchStatus = HEADLESS_BATCH_STATUSES.RUNNING;
     nextState.headlessBatchErrorMessage = null;
     nextState.headlessBatchMatchState = null;
+    nextState.headlessBatchMode = HEADLESS_BATCH_MODES.SIMPLE;
+    nextState.headlessBatchControllerWins = {
+      [PLAYER_CONTROLLER_TYPES.AI_BASE]: 0,
+      [PLAYER_CONTROLLER_TYPES.AI_SMART]: 0
+    };
+    nextState.headlessBatchSeatWins = [0, 0];
+    nextState.headlessBatchRandomFn = typeof options.rng === "function"
+      ? options.rng
+      : (typeof previousState?.headlessBatchRandomFn === "function" ? previousState.headlessBatchRandomFn : Math.random);
     nextState.isAiVsAiPaused = false;
     nextState.isAiTurnInProgress = true;
     nextState.aiStepText = "Simulando bateria IA x IA...";
@@ -2397,6 +2464,11 @@
 
     state.headlessBatchCompletedCount += 1;
     state.headlessBatchWins[matchState.winner.id - 1] += 1;
+    state.headlessBatchSeatWins[matchState.winner.id - 1] += 1;
+    const winningController = getAiControllerForPlayer(matchState, matchState.winner.id - 1);
+    if (isAiControllerType(winningController)) {
+      state.headlessBatchControllerWins[winningController] = (state.headlessBatchControllerWins[winningController] || 0) + 1;
+    }
     state.headlessBatchMatchState = null;
     state.headlessBatchCurrentMatchActionCount = 0;
 
@@ -2481,7 +2553,7 @@
       || compareText(left.nome, right.nome);
   }
 
-  function getNextAiAction(state, options = {}) {
+  function getNextBaseAiAction(state, options = {}) {
     if (!canAiTakeStep(state, { ignorePause: options.ignorePause === true })) {
       return null;
     }
@@ -2699,9 +2771,29 @@
     };
   }
 
-  function performAiStep(state, options = {}) {
-    const action = getNextAiAction(state, options);
+  function getNextAiActionForController(state, controllerType, options = {}) {
+    const normalizedController = normalizePlayerController(controllerType);
 
+    if (!isAiControllerType(normalizedController)) {
+      return null;
+    }
+
+    if (normalizedController === PLAYER_CONTROLLER_TYPES.AI_SMART) {
+      return getNextBaseAiAction(state, options);
+    }
+
+    return getNextBaseAiAction(state, options);
+  }
+
+  function getNextAiAction(state, options = {}) {
+    if (!canAiTakeStep(state, { ignorePause: options.ignorePause === true })) {
+      return null;
+    }
+
+    return getNextAiActionForController(state, getAiControllerForPlayer(state, state.currentPlayerIndex), options);
+  }
+
+  function executeAiAction(state, action) {
     if (!action) {
       return null;
     }
@@ -2774,6 +2866,11 @@
     }
 
     return action;
+  }
+
+  function performAiStep(state, options = {}) {
+    const action = getNextAiAction(state, options);
+    return executeAiAction(state, action);
   }
 
   function scheduleAiTurn(state) {
@@ -3683,6 +3780,7 @@
         canDraw: false,
         playableCards: 0,
         readyAttackers: 0,
+        defenseMovers: 0,
         pendingSelection: false,
         hasAny: false
       };
@@ -3694,7 +3792,7 @@
     const readyAttackers = getAvailableAttackers(player).length;
     const defenseMovers = player.board.filter((unit) => canUnitSelectForAction(state, playerIndex, unit) && unit.isDefending).length;
     const pendingSelection = Boolean(state.selectedAttackerId || state.selectedEffectCard);
-    const hasAny = canDraw || playableCards > 0 || readyAttackers > 0 || defenseMovers > 0 || pendingSelection;
+    const hasAny = canDraw || playableCards > 0 || readyAttackers > 0 || pendingSelection;
 
     return {
       canDraw,
@@ -4187,6 +4285,77 @@
     });
   }
 
+  function handleBoardUnitClick(state, renderedState, playerIndex, cardInstanceId) {
+    const matchStarted = Boolean(renderedState?.isMatchStarted);
+    const viewingHistory = isViewingHistory(state);
+    const aiTurnActive = isAiTurnActive(state);
+    const isCurrentPlayer = playerIndex === renderedState?.currentPlayerIndex;
+    const card = findCardByInstanceId(renderedState?.players?.[playerIndex]?.board, cardInstanceId);
+    const selectedUnit = getSelectedUnit(state);
+
+    if (!card) {
+      return false;
+    }
+
+    const canSelect = matchStarted && !viewingHistory && !aiTurnActive && !state.winner && isCurrentPlayer && canUnitSelectForAction(state, playerIndex, card);
+    const canBeCombatTargeted = matchStarted
+      && !viewingHistory
+      && !aiTurnActive
+      && !isCurrentPlayer
+      && Boolean(selectedUnit)
+      && !selectedUnit.isDefending
+      && !state.selectedEffectCard
+      && !state.winner
+      && !isCombatTargetProtected(state, "unit", playerIndex, card.instanceId);
+    const canBeDamageEffectTargeted = matchStarted
+      && !viewingHistory
+      && !aiTurnActive
+      && !isCurrentPlayer
+      && Boolean(state.selectedEffectCard)
+      && state.selectedEffectCard.efeito === "dano_direto"
+      && !state.winner;
+    const canBeHealingEffectTargeted = matchStarted
+      && !viewingHistory
+      && !aiTurnActive
+      && isCurrentPlayer
+      && Boolean(state.selectedEffectCard)
+      && state.selectedEffectCard.efeito === "cura_direta"
+      && !state.winner
+      && card.vida < card.vidaBase;
+    const canBeDefenseTargeted = matchStarted
+      && !viewingHistory
+      && !aiTurnActive
+      && isCurrentPlayer
+      && Boolean(selectedUnit)
+      && !state.selectedEffectCard
+      && !state.winner
+      && selectedUnit.instanceId !== card.instanceId
+      && canUnitProtectTarget(state, state.currentPlayerIndex, selectedUnit, "unit", playerIndex, card.instanceId);
+
+    // Prioritize ally-protection clicks over reselecting another ready ally.
+    if (canBeDefenseTargeted) {
+      return enterDefenseMode(state, state.currentPlayerIndex, selectedUnit.instanceId, "unit", playerIndex, card.instanceId);
+    }
+
+    if (canSelect) {
+      return selectAttacker(state, playerIndex, card.instanceId);
+    }
+
+    if (canBeCombatTargeted) {
+      return attackTarget(state, state.currentPlayerIndex, "unit", card.instanceId);
+    }
+
+    if (canBeDamageEffectTargeted) {
+      return resolveEffectTarget(state, state.currentPlayerIndex, "unit", card.instanceId);
+    }
+
+    if (canBeHealingEffectTargeted) {
+      return resolveEffectTarget(state, state.currentPlayerIndex, "ally-unit", card.instanceId);
+    }
+
+    return false;
+  }
+
   function buildUnitCardElementForBoard(state, renderedState, playerIndex, card) {
     const matchStarted = Boolean(renderedState.isMatchStarted);
     const viewingHistory = isViewingHistory(state);
@@ -4234,17 +4403,7 @@
       selected: isSelected,
       className: (canBeCombatTargeted || canBeDamageEffectTargeted || canBeHealingEffectTargeted || canBeDefenseTargeted) ? "targetable" : "",
       onClick: () => {
-        if (canSelect) {
-          selectAttacker(state, playerIndex, card.instanceId);
-        } else if (canBeDefenseTargeted) {
-          enterDefenseMode(state, state.currentPlayerIndex, selectedUnit.instanceId, "unit", playerIndex, card.instanceId);
-        } else if (canBeCombatTargeted) {
-          attackTarget(state, state.currentPlayerIndex, "unit", card.instanceId);
-        } else if (canBeDamageEffectTargeted) {
-          resolveEffectTarget(state, state.currentPlayerIndex, "unit", card.instanceId);
-        } else if (canBeHealingEffectTargeted) {
-          resolveEffectTarget(state, state.currentPlayerIndex, "ally-unit", card.instanceId);
-        }
+        handleBoardUnitClick(state, renderedState, playerIndex, card.instanceId);
         render(state);
       },
       player: renderedState.players[playerIndex]
@@ -5421,6 +5580,7 @@
       HEADLESS_AI_BATCH_SIZE,
       HEADLESS_AI_BATCH_DEFAULT_MATCHES,
       HEADLESS_AI_BATCH_MAX_MATCHES,
+      HEADLESS_BATCH_MODES,
       MATCH_HISTORY_STORAGE_KEY,
       MAX_SAVED_MATCHES,
       MATCH_PRESENTATION_MODES,
@@ -5468,6 +5628,7 @@
       resolvePlayerHeaderTarget,
       toggleExclusiveSidePanel,
       isAiEnabled,
+      getAiControllerForPlayer,
       isAiControlledPlayer,
       isAiVsAiMatch,
       isHeadlessAiVsAiMode,
@@ -5490,7 +5651,10 @@
       attemptEndTurn,
       cancelPendingAction,
       handleShortcutAction,
+      getNextBaseAiAction,
+      getNextAiActionForController,
       getNextAiAction,
+      executeAiAction,
       validateCurrentLog,
       buildLogValidationExportPayload,
       canCopyFocusedLogValidationIssue,
@@ -5511,6 +5675,7 @@
       getPlayerDeckTotal,
       getGlobalDeckCount,
       getGlobalDiscardCount,
+      handleBoardUnitClick,
       enterDefenseMode,
       cancelDefenseMode,
       canUnitEnterDefense,
