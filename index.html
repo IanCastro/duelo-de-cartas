@@ -48,7 +48,8 @@
           <span class="controller-picker-label">Jogador 1</span>
           <div class="controller-options" role="group" aria-label="Controle do Jogador 1">
             <button id="player-1-controller-human" class="controller-option" type="button" data-controller-button data-player-index="0" data-controller="human" aria-pressed="true">Humano</button>
-            <button id="player-1-controller-ai" class="controller-option" type="button" data-controller-button data-player-index="0" data-controller="ai" aria-pressed="false">IA</button>
+            <button id="player-1-controller-ai-base" class="controller-option" type="button" data-controller-button data-player-index="0" data-controller="ai_base" aria-pressed="false">IA Base</button>
+            <button id="player-1-controller-ai-smart" class="controller-option" type="button" data-controller-button data-player-index="0" data-controller="ai_smart" aria-pressed="false">IA Nova</button>
           </div>
         </div>
 
@@ -56,7 +57,8 @@
           <span class="controller-picker-label">Jogador 2</span>
           <div class="controller-options" role="group" aria-label="Controle do Jogador 2">
             <button id="player-2-controller-human" class="controller-option" type="button" data-controller-button data-player-index="1" data-controller="human" aria-pressed="false">Humano</button>
-            <button id="player-2-controller-ai" class="controller-option" type="button" data-controller-button data-player-index="1" data-controller="ai" aria-pressed="true">IA</button>
+            <button id="player-2-controller-ai-base" class="controller-option" type="button" data-controller-button data-player-index="1" data-controller="ai_base" aria-pressed="true">IA Base</button>
+            <button id="player-2-controller-ai-smart" class="controller-option" type="button" data-controller-button data-player-index="1" data-controller="ai_smart" aria-pressed="false">IA Nova</button>
           </div>
         </div>
 
@@ -69,7 +71,7 @@
         </div>
 
         <div class="controller-picker match-count-picker" id="simulate-ai-match-count-picker" hidden>
-          <label class="controller-picker-label" for="simulate-ai-match-count">Partidas da simulacao</label>
+          <label id="simulate-ai-match-count-label" class="controller-picker-label" for="simulate-ai-match-count">Partidas da simulacao</label>
           <input id="simulate-ai-match-count" class="controller-number-input" type="number" min="1" max="1000" step="1" value="1" inputmode="numeric">
         </div>
 
@@ -96,12 +98,20 @@
           <span class="stat-label">Progresso</span>
           <strong id="headless-ai-progress">0/1</strong>
         </div>
+        <div class="stat" id="headless-ai-controller-primary-stat" hidden>
+          <span id="headless-ai-controller-primary-label" class="stat-label">IA Base</span>
+          <strong id="headless-ai-controller-primary-wins">0</strong>
+        </div>
+        <div class="stat" id="headless-ai-controller-secondary-stat" hidden>
+          <span id="headless-ai-controller-secondary-label" class="stat-label">IA Nova</span>
+          <strong id="headless-ai-controller-secondary-wins">0</strong>
+        </div>
         <div class="stat">
-          <span class="stat-label">Sentinela Azul</span>
+          <span class="stat-label">Jogador 1</span>
           <strong id="headless-ai-player-1-wins">0</strong>
         </div>
         <div class="stat">
-          <span class="stat-label">Guardiao Rubro</span>
+          <span class="stat-label">Jogador 2</span>
           <strong id="headless-ai-player-2-wins">0</strong>
         </div>
       </div>
@@ -278,11 +288,11 @@
           </div>
           <p>Cada jogador comeca com 40 de vida e 4 cartas na mao. O baralho tem 32 cartas no total, com 4 copias de cada carta.</p>
           <p>A mana aumenta a cada rodada ate 8. O segundo jogador recebe +1 de mana em todos os turnos para compensar a vantagem de comecar.</p>
-          <p>Antes de cada partida, escolha separadamente se o Jogador 1 e o Jogador 2 serao Humano ou IA. A partida so comeca quando voce clicar em Start.</p>
+          <p>Antes de cada partida, escolha separadamente se o Jogador 1 e o Jogador 2 serao Humano, IA Base ou IA Nova. A partida so comeca quando voce clicar em Start.</p>
           <p>Voce tambem pode escolher entre baralho Compartilhado e Separado. O default e Separado, com 2 copias de cada carta por jogador. No Compartilhado, o jogo usa o baralho unico atual com 4 copias de cada carta.</p>
           <p>Depois que a partida comeca, essa configuracao fica travada. Use Nova partida para abandonar a partida atual e voltar ao pre-jogo com a configuracao preservada.</p>
           <p>Se voce definir os dois jogadores como IA, a partida roda automaticamente em IA vs IA. Se definir apenas um lado como IA, esse lado joga sozinho quando o turno dele comecar.</p>
-          <p>Quando os dois lados estiverem como IA, voce tambem pode usar Simular IA x IA para rodar uma bateria de partidas sem tabuleiro, escolhendo quantas partidas quer executar e vendo apenas o placar final ao terminar.</p>
+          <p>Quando os dois lados estiverem como IA, voce tambem pode usar Simular IA x IA para rodar uma bateria de partidas sem tabuleiro. Se escolher perfis diferentes, o numero informado vira a quantidade de pares espelhados e o resultado mostra um placar final tanto por IA quanto separado por lado.</p>
           <p>Unidades ficam em campo. Suportes permanecem ativos. Efeitos entram em selecao de alvo e vao para o descarte quando resolvidos.</p>
           <p>Selecione uma unidade pronta e clique em outra unidade aliada ou no proprio heroi para coloca-la defendendo esse alvo. A defensora fica deitada, recebe metade do dano arredondado para cima e impede ataques diretos ao alvo protegido enquanto permanecer em campo.</p>
           <p>Cada unidade pode atacar no turno em que entra em campo e depois 1 vez por turno. Se o rival nao tiver unidades em campo, voce pode destruir um suporte com 1 ataque. Reparo Rapido so pode curar alvos feridos.</p>

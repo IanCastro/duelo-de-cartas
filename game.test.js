@@ -22,7 +22,7 @@ function test(name, callback) {
 function createStartedState(config = {}) {
   const playerControllers = Array.isArray(config)
     ? config
-    : (config.playerControllers || [game.PLAYER_CONTROLLER_TYPES.HUMAN, game.PLAYER_CONTROLLER_TYPES.AI]);
+    : (config.playerControllers || [game.PLAYER_CONTROLLER_TYPES.HUMAN, game.PLAYER_CONTROLLER_TYPES.AI_BASE]);
   const deckMode = Array.isArray(config)
     ? game.DECK_MODES.SHARED
     : (config.deckMode || game.DECK_MODES.SHARED);
@@ -118,6 +118,19 @@ function createSeededRng(seed) {
   };
 }
 
+function runHeadlessBatchToCompletion(state, batchSize = 120, guardLimit = 4000) {
+  let guard = 0;
+
+  while (state.isHeadlessSimulationRunning && guard < guardLimit) {
+    const actions = game.performHeadlessSimulationBatch(state, batchSize);
+    assert(actions > 0 || !state.isHeadlessSimulationRunning, "each headless simulation tick should keep the batch moving forward");
+    guard += 1;
+  }
+
+  assert(guard < guardLimit, "headless simulation batch should finish before hitting the guard limit");
+  return state;
+}
+
 test("initial state opens in pre-game with default player controllers", () => {
   const state = game.createInitialState();
 
@@ -130,7 +143,7 @@ test("initial state opens in pre-game with default player controllers", () => {
   assert(state.players[1].manaAtual === 0 && state.players[1].manaMax === 0, "player 2 should not have mana before Start");
   assert(Array.isArray(state.playerControllers), "the game should store controller config by player");
   assert(state.playerControllers[0] === game.PLAYER_CONTROLLER_TYPES.HUMAN, "player 1 should default to human");
-  assert(state.playerControllers[1] === game.PLAYER_CONTROLLER_TYPES.AI, "player 2 should default to ai");
+  assert(state.playerControllers[1] === game.PLAYER_CONTROLLER_TYPES.AI_BASE, "player 2 should default to ia base");
   assert(state.deckMode === game.DECK_MODES.SEPARATE, "pre-game should default to separate decks");
   assert(state.headlessBatchRequestedCount === 1, "the headless ai-vs-ai batch input should default to 1 match");
   assert(Array.isArray(state.log), "game should keep a log array");
@@ -161,17 +174,17 @@ test("session player controllers control how new matches start", () => {
   const previousControllers = game.getSessionPlayerControllers();
 
   try {
-    game.setSessionPlayerController(0, game.PLAYER_CONTROLLER_TYPES.AI);
+    game.setSessionPlayerController(0, game.PLAYER_CONTROLLER_TYPES.AI_BASE);
     game.setSessionPlayerController(1, game.PLAYER_CONTROLLER_TYPES.HUMAN);
     const humanMatch = game.createInitialState();
-    assert(humanMatch.playerControllers[0] === game.PLAYER_CONTROLLER_TYPES.AI, "new pre-game states should use the session player 1 selection");
+    assert(humanMatch.playerControllers[0] === game.PLAYER_CONTROLLER_TYPES.AI_BASE, "new pre-game states should use the session player 1 selection");
     assert(humanMatch.playerControllers[1] === game.PLAYER_CONTROLLER_TYPES.HUMAN, "new pre-game states should use the session player 2 selection");
 
     game.setSessionPlayerController(0, game.PLAYER_CONTROLLER_TYPES.HUMAN);
-    game.setSessionPlayerController(1, game.PLAYER_CONTROLLER_TYPES.AI);
+    game.setSessionPlayerController(1, game.PLAYER_CONTROLLER_TYPES.AI_BASE);
     const aiMatch = game.createInitialState();
     assert(aiMatch.playerControllers[0] === game.PLAYER_CONTROLLER_TYPES.HUMAN, "changing the session player 1 selection should affect the next new match");
-    assert(aiMatch.playerControllers[1] === game.PLAYER_CONTROLLER_TYPES.AI, "changing the session player 2 selection should affect the next new match");
+    assert(aiMatch.playerControllers[1] === game.PLAYER_CONTROLLER_TYPES.AI_BASE, "changing the session player 2 selection should affect the next new match");
   } finally {
     game.setSessionPlayerController(0, previousControllers[0]);
     game.setSessionPlayerController(1, previousControllers[1]);
@@ -671,6 +684,44 @@ test("headless ai-vs-ai batch ignores the pause toggle and finishes with an aggr
   assert(state.log.length === 0, "headless ai-vs-ai batches should not expose a live detailed log on the host state");
   assert(state.headlessBatchErrorMessage === null, "successful batches should finish without an error message");
   assert(state.aiStepText === "Bateria IA x IA concluida.", "headless ai-vs-ai batch should end with a concise completion status");
+});
+
+test("headless ai comparison batch mirrors seats and tracks controller wins", () => {
+  const pregameState = game.createInitialState();
+  pregameState.playerControllers = [game.PLAYER_CONTROLLER_TYPES.AI_BASE, game.PLAYER_CONTROLLER_TYPES.AI_SMART];
+  pregameState.deckMode = game.DECK_MODES.SEPARATE;
+  const state = game.startHeadlessAiBatch(pregameState, 3, { rng: createSeededRng(123456) });
+
+  assert(state.headlessBatchMode === game.HEADLESS_BATCH_MODES.MIRRORED_COMPARE, "different ai profiles should start mirrored comparison mode");
+  assert(state.headlessBatchPairCountRequested === 3, "mirrored comparison should store the requested pair count");
+  assert(state.aiStepText === "Comparando IA Base x IA Nova em pares espelhados...", "mirrored comparison should explain the comparison mode in the initial status");
+
+  runHeadlessBatchToCompletion(state, 160);
+
+  const controllerWins = state.headlessBatchControllerWins[game.PLAYER_CONTROLLER_TYPES.AI_BASE]
+    + state.headlessBatchControllerWins[game.PLAYER_CONTROLLER_TYPES.AI_SMART];
+
+  assert(state.headlessBatchCompletedCount === 6, "mirrored comparison should run two matches per requested pair");
+  assert(controllerWins === 6, "controller wins should account for every mirrored comparison match");
+  assert(state.headlessBatchSeatWins[0] + state.headlessBatchSeatWins[1] === 6, "seat wins should still account for every mirrored comparison match");
+  assert(state.matchHistory.length === 0, "mirrored comparison should not create persistent history entries");
+  assert(state.aiStepText === "Comparacao IA x IA concluida.", "mirrored comparison should end with the dedicated completion status");
+});
+
+test("smart ai wins most mirrored comparison matches against the base ai", () => {
+  const pregameState = game.createInitialState();
+  pregameState.playerControllers = [game.PLAYER_CONTROLLER_TYPES.AI_BASE, game.PLAYER_CONTROLLER_TYPES.AI_SMART];
+  pregameState.deckMode = game.DECK_MODES.SEPARATE;
+  const state = game.startHeadlessAiBatch(pregameState, 100, { rng: createSeededRng(55) });
+
+  runHeadlessBatchToCompletion(state, 400, 12000);
+
+  const baseWins = state.headlessBatchControllerWins[game.PLAYER_CONTROLLER_TYPES.AI_BASE] || 0;
+  const smartWins = state.headlessBatchControllerWins[game.PLAYER_CONTROLLER_TYPES.AI_SMART] || 0;
+  const totalMatches = baseWins + smartWins;
+
+  assert(totalMatches === 200, `the mirrored benchmark should complete 200 total matches, but stopped with status=${state.headlessBatchStatus}, completed=${state.headlessBatchCompletedCount}, base=${baseWins}, smart=${smartWins}, error=${state.headlessBatchErrorMessage}`);
+  assert((smartWins / totalMatches) >= 0.55, `smart ai should win at least 55% of the mirrored benchmark, but got ${smartWins}/${totalMatches}`);
 });
 
 test("restarting a headless ai-vs-ai batch returns to pre-game without archiving history", () => {
@@ -1251,6 +1302,73 @@ test("base ai helper stays aligned with the default ai dispatcher", () => {
   assert(dispatchedAction?.targetInstanceId === baseAction?.targetInstanceId, "dispatching ai_base should preserve the same target");
   assert(defaultAction?.type === baseAction?.type, "the default ai dispatcher should stay aligned with ai_base");
   assert(defaultAction?.targetInstanceId === baseAction?.targetInstanceId, "the default dispatcher should preserve the ai_base target");
+});
+
+test("smart ai can prioritize stabilizing the hero over healing a damaged ally", () => {
+  const state = createStartedState();
+  state.currentPlayerIndex = 1;
+  state.playerControllers = [game.PLAYER_CONTROLLER_TYPES.HUMAN, game.PLAYER_CONTROLLER_TYPES.AI_SMART];
+  state.players[1].vida = 8;
+  state.players[1].manaAtual = 2;
+  state.players[1].manaMax = 2;
+  state.players[1].hand = [{
+    id: "repair",
+    instanceId: "repair",
+    nome: "Reparo Rapido",
+    categoria: "efeito",
+    custo: 2,
+    efeito: "cura_direta",
+    valor: 4,
+    descricao: ""
+  }];
+  state.players[1].board = [{
+    id: "ally-guard",
+    instanceId: "ally-guard",
+    nome: "Escudeiro Solar",
+    categoria: "unidade",
+    custo: 3,
+    ataque: 3,
+    vida: 2,
+    vidaBase: 6,
+    descricao: "",
+    estado: "campo",
+    podeAgir: true,
+    jaAtacouNoTurno: false
+  }];
+  state.players[0].board = [{
+    id: "enemy-one",
+    instanceId: "enemy-one",
+    nome: "Guardiao Rubro",
+    categoria: "unidade",
+    custo: 4,
+    ataque: 4,
+    vida: 5,
+    vidaBase: 5,
+    descricao: "",
+    estado: "campo",
+    podeAgir: true,
+    jaAtacouNoTurno: false
+  }, {
+    id: "enemy-two",
+    instanceId: "enemy-two",
+    nome: "Lanceiro Hostil",
+    categoria: "unidade",
+    custo: 4,
+    ataque: 4,
+    vida: 5,
+    vidaBase: 5,
+    descricao: "",
+    estado: "campo",
+    podeAgir: true,
+    jaAtacouNoTurno: false
+  }];
+
+  const baseAction = game.getNextBaseAiAction(state);
+  const smartAction = game.getNextSmartAiAction(state);
+
+  assert(baseAction?.type === "effect-ally-unit", "the base ai should keep healing the damaged allied unit first");
+  assert(baseAction?.targetInstanceId === "ally-guard", "the base ai should target the damaged allied unit");
+  assert(smartAction?.type === "effect-player", "the smart ai should heal the hero when the incoming pressure is lethal");
 });
 
 test("ai action helper prioritizes killing an enemy unit before attacking the player", () => {
@@ -2303,7 +2421,10 @@ test("layout markup removes the cancel button and keeps a pending effect slot", 
   assert(!css.includes("min-height: 100%"), "pregame actions should no longer stretch buttons in a way that can overflow the panel");
   assert(html.indexOf("id=\"match-config-panel\"") < html.indexOf("id=\"ai-match-strip\""), "ai-vs-ai strip should come after the pre-game config panel in the markup");
   assert(html.includes("id=\"player-1-controller-human\""), "the config panel should expose a controller toggle for player 1");
-  assert(html.includes("id=\"player-2-controller-ai\""), "the config panel should expose a controller toggle for player 2");
+  assert(html.includes("id=\"player-1-controller-ai-base\""), "the config panel should expose the base ai option for player 1");
+  assert(html.includes("id=\"player-1-controller-ai-smart\""), "the config panel should expose the smart ai option for player 1");
+  assert(html.includes("id=\"player-2-controller-ai-base\""), "the config panel should expose the base ai option for player 2");
+  assert(html.includes("id=\"player-2-controller-ai-smart\""), "the config panel should expose the smart ai option for player 2");
   assert(html.includes("id=\"deck-mode-separate\""), "the config panel should expose a separate-deck toggle");
   assert(html.includes("id=\"deck-mode-shared\""), "the config panel should expose a shared-deck toggle");
   assert(html.includes("id=\"simulate-ai-match-count\""), "the config panel should expose a numeric input for ai-vs-ai batch size");
@@ -2311,6 +2432,8 @@ test("layout markup removes the cancel button and keeps a pending effect slot", 
   assert(html.includes("id=\"simulate-ai-match-button\""), "the config panel should expose a dedicated headless ai-vs-ai button");
   assert(html.includes("id=\"headless-ai-panel\""), "the page should expose a minimal panel for headless ai-vs-ai runs");
   assert(html.includes("id=\"headless-ai-progress\""), "the headless ai-vs-ai panel should expose a progress counter");
+  assert(html.includes("id=\"headless-ai-controller-primary-stat\""), "the headless ai-vs-ai panel should expose the first ai comparison stat");
+  assert(html.includes("id=\"headless-ai-controller-secondary-stat\""), "the headless ai-vs-ai panel should expose the second ai comparison stat");
   assert(html.includes("id=\"headless-ai-player-1-wins\""), "the headless ai-vs-ai panel should expose the first side scoreboard");
   assert(html.includes("id=\"headless-ai-player-2-wins\""), "the headless ai-vs-ai panel should expose the second side scoreboard");
   assert(html.includes("id=\"headless-ai-error\""), "the headless ai-vs-ai panel should expose an error slot for failed batches");
@@ -2338,9 +2461,11 @@ test("layout markup removes the cancel button and keeps a pending effect slot", 
   assert(html.includes("fica deitada"), "rules should describe the defense stance visuals");
   assert(html.includes("clique em outra unidade aliada ou no proprio heroi"), "rules should describe the new click-to-defend flow");
   assert(!html.includes("botao de escudo"), "rules should no longer mention the removed defense button");
+  assert(html.includes("IA Base"), "rules should explain the base ai profile");
+  assert(html.includes("IA Nova"), "rules should explain the smart ai profile");
   assert(html.includes("IA vs IA"), "rules should describe how to configure ai vs ai");
   assert(html.includes("Simular IA x IA"), "rules should mention the dedicated headless ai-vs-ai simulation flow");
-  assert(html.includes("quantas partidas"), "rules should mention choosing how many ai-vs-ai matches to simulate");
+  assert(html.includes("pares espelhados"), "rules should mention the mirrored-pair comparison flow for different ai profiles");
   assert(html.includes("placar final"), "rules should mention that ai-vs-ai batches end with a final scoreboard");
   assert(html.includes("Validar log"), "rules should mention the manual log validation flow");
   assert(html.includes("Use Historico para revisar partidas encerradas ou abandonadas"), "rules should mention the persistent match history flow");

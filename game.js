@@ -206,7 +206,16 @@
   }
 
   function getControllerDisplayLabel(controller) {
-    return normalizePlayerController(controller) === PLAYER_CONTROLLER_TYPES.HUMAN ? "Humano" : "IA";
+    const normalizedController = normalizePlayerController(controller);
+    if (normalizedController === PLAYER_CONTROLLER_TYPES.AI_SMART) {
+      return "IA Nova";
+    }
+
+    if (normalizedController === PLAYER_CONTROLLER_TYPES.AI_BASE) {
+      return "IA Base";
+    }
+
+    return "Humano";
   }
 
   function isAiControllerType(controller) {
@@ -2238,6 +2247,30 @@
     );
   }
 
+  function isHeadlessAiComparisonMode(state) {
+    return Boolean(state && state.headlessBatchMode === HEADLESS_BATCH_MODES.MIRRORED_COMPARE);
+  }
+
+  function getHeadlessBatchTotalMatchCount(state) {
+    if (isHeadlessAiComparisonMode(state)) {
+      return state.headlessBatchRequestedCount * 2;
+    }
+
+    return state?.headlessBatchRequestedCount || 0;
+  }
+
+  function getHeadlessBatchControllersForMatch(state) {
+    const controllers = normalizePlayerControllers(state?.playerControllers);
+
+    if (!isHeadlessAiComparisonMode(state)) {
+      return controllers;
+    }
+
+    return state.headlessBatchCompletedCount % 2 === 0
+      ? controllers
+      : [controllers[1], controllers[0]];
+  }
+
   function canAiTakeStep(state, options = {}) {
     const ignorePause = options.ignorePause === true;
     return Boolean(
@@ -2325,7 +2358,7 @@
 
   function createHeadlessBatchMatchState(state) {
     const pregameState = createInitialState();
-    pregameState.playerControllers = normalizePlayerControllers(state.playerControllers);
+    pregameState.playerControllers = getHeadlessBatchControllersForMatch(state);
     pregameState.deckMode = normalizeDeckMode(state.deckMode);
 
     const matchState = startConfiguredMatch(pregameState, {
@@ -2379,7 +2412,9 @@
     state.headlessBatchCurrentMatchActionCount = 0;
     if (state.headlessBatchStatus !== HEADLESS_BATCH_STATUSES.FAILED) {
       state.headlessBatchStatus = HEADLESS_BATCH_STATUSES.FINISHED;
-      state.aiStepText = "Bateria IA x IA concluida.";
+      state.aiStepText = isHeadlessAiComparisonMode(state)
+        ? "Comparacao IA x IA concluida."
+        : "Bateria IA x IA concluida.";
     }
     return true;
   }
@@ -2402,11 +2437,13 @@
       return startConfiguredMatch(previousState);
     }
 
+    const normalizedControllers = normalizePlayerControllers(previousState?.playerControllers);
+    const isComparisonMode = normalizedControllers[0] !== normalizedControllers[1];
     const nextState = createInitialState();
-    nextState.playerControllers = setSessionPlayerControllers(previousState?.playerControllers);
+    nextState.playerControllers = setSessionPlayerControllers(normalizedControllers);
     nextState.deckMode = setSessionDeckMode(previousState?.deckMode);
     nextState.headlessBatchRequestedCount = normalizeHeadlessBatchCount(requestedCount);
-    nextState.headlessBatchPairCountRequested = 0;
+    nextState.headlessBatchPairCountRequested = isComparisonMode ? normalizeHeadlessBatchCount(requestedCount) : 0;
     nextState.matchHistory = (previousState?.matchHistory || []).map((record) => cloneSavedMatchRecord(record));
     nextState.currentMatchId = createUniqueMatchId();
     nextState.isMatchStarted = true;
@@ -2419,7 +2456,7 @@
     nextState.headlessBatchStatus = HEADLESS_BATCH_STATUSES.RUNNING;
     nextState.headlessBatchErrorMessage = null;
     nextState.headlessBatchMatchState = null;
-    nextState.headlessBatchMode = HEADLESS_BATCH_MODES.SIMPLE;
+    nextState.headlessBatchMode = isComparisonMode ? HEADLESS_BATCH_MODES.MIRRORED_COMPARE : HEADLESS_BATCH_MODES.SIMPLE;
     nextState.headlessBatchControllerWins = {
       [PLAYER_CONTROLLER_TYPES.AI_BASE]: 0,
       [PLAYER_CONTROLLER_TYPES.AI_SMART]: 0
@@ -2430,7 +2467,9 @@
       : (typeof previousState?.headlessBatchRandomFn === "function" ? previousState.headlessBatchRandomFn : Math.random);
     nextState.isAiVsAiPaused = false;
     nextState.isAiTurnInProgress = true;
-    nextState.aiStepText = "Simulando bateria IA x IA...";
+    nextState.aiStepText = isComparisonMode
+      ? `Comparando ${getHeadlessBatchComparisonLabel(nextState)} em pares espelhados...`
+      : "Simulando bateria IA x IA...";
     nextState.isLibraryOpen = false;
     nextState.isRulesOpen = false;
     nextState.isLogOpen = false;
@@ -2472,13 +2511,13 @@
     state.headlessBatchMatchState = null;
     state.headlessBatchCurrentMatchActionCount = 0;
 
-    if (state.headlessBatchCompletedCount >= state.headlessBatchRequestedCount) {
+    if (state.headlessBatchCompletedCount >= getHeadlessBatchTotalMatchCount(state)) {
       finishHeadlessAiMatch(state);
       return true;
     }
 
     state.headlessBatchCurrentMatchNumber = state.headlessBatchCompletedCount + 1;
-    state.aiStepText = `Preparando a partida ${state.headlessBatchCurrentMatchNumber} de ${state.headlessBatchRequestedCount}.`;
+    state.aiStepText = `Preparando a partida ${state.headlessBatchCurrentMatchNumber} de ${getHeadlessBatchTotalMatchCount(state)}.`;
     return true;
   }
 
@@ -2551,6 +2590,520 @@
   function compareSupportsForAiTarget(left, right) {
     return (getAiSupportPriority(left) - getAiSupportPriority(right))
       || compareText(left.nome, right.nome);
+  }
+
+  function createAiEvaluationState(state) {
+    const previewState = createInitialState();
+    previewState.deck = cloneData(state.deck);
+    previewState.discardPile = cloneData(state.discardPile);
+    previewState.playerDecks = cloneData(state.playerDecks || [[], []]);
+    previewState.playerDiscardPiles = cloneData(state.playerDiscardPiles || [[], []]);
+    previewState.currentPlayerIndex = state.currentPlayerIndex;
+    previewState.playerControllers = normalizePlayerControllers(state.playerControllers);
+    previewState.deckMode = normalizeDeckMode(state.deckMode);
+    previewState.isMatchStarted = Boolean(state.isMatchStarted);
+    previewState.selectedAttackerId = state.selectedAttackerId;
+    previewState.selectedEffectCard = cloneData(state.selectedEffectCard);
+    previewState.turnNumber = state.turnNumber;
+    previewState.nextDefenseOrder = state.nextDefenseOrder;
+    previewState.players = cloneData(state.players);
+    previewState.winner = state.winner
+      ? previewState.players.find((player) => player.id === state.winner.id) || null
+      : null;
+    previewState.isWinnerModalOpen = Boolean(previewState.winner);
+    previewState.log = [];
+    previewState.nextLogNumber = 1;
+    previewState.matchHistory = [];
+    previewState.currentMatchId = null;
+    previewState.historySourceRecordId = null;
+    previewState.hasDivergedFromHistorySource = false;
+    previewState.hasCurrentMatchBeenSavedToHistory = true;
+    previewState.isHeadlessBatchInternal = true;
+    previewState.suppressValidationAlerts = true;
+    return previewState;
+  }
+
+  function getAiSupportBoardValue(card) {
+    if (card.efeito === "aura_ataque") {
+      return 8;
+    }
+
+    if (card.efeito === "cura_fim_turno") {
+      return 5;
+    }
+
+    return 2;
+  }
+
+  function getAiUnitBoardValue(state, playerIndex, unit) {
+    const player = state.players[playerIndex];
+    const heroProtectionBonus = doesUnitProtectTarget(unit, "player", playerIndex) ? 5 : 0;
+    const allyProtectionBonus = unit.isDefending && unit.defendingTargetType === "unit" ? 3 : 0;
+    const unitAttack = getUnitAttack(unit, player);
+    const readyToAttack = Boolean(unit.podeAgir && !unit.jaAtacouNoTurno && !unit.isDefending);
+    const attackValue = unit.isDefending
+      ? unitAttack
+      : unit.jaAtacouNoTurno
+        ? unitAttack * 2
+        : unitAttack * 4;
+    const readinessBonus = readyToAttack ? unitAttack * 3 : 0;
+    const healthValue = (unit.vida || 0) * 2;
+    return ((unit.custo || 0) * 3)
+      + attackValue
+      + readinessBonus
+      + healthValue
+      + heroProtectionBonus
+      + allyProtectionBonus;
+  }
+
+  function getAiHeroPressure(state, targetPlayerIndex) {
+    const attackerPlayerIndex = (targetPlayerIndex + 1) % 2;
+    const attackerPlayer = state.players[attackerPlayerIndex];
+    return attackerPlayer.board
+      .filter((unit) => !unit.isDefending)
+      .reduce((total, unit) => total + getUnitAttack(unit, attackerPlayer), 0);
+  }
+
+  function getAiBoardValue(state, playerIndex) {
+    const player = state.players[playerIndex];
+    return player.board.reduce((total, unit) => total + getAiUnitBoardValue(state, playerIndex, unit), 0)
+      + player.supportZone.reduce((total, support) => total + getAiSupportBoardValue(support), 0);
+  }
+
+  function evaluateAiStateScore(state, playerIndex) {
+    const opponentIndex = (playerIndex + 1) % 2;
+    const player = state.players[playerIndex];
+    const opponent = state.players[opponentIndex];
+
+    if (opponent.vida <= 0) {
+      return 1000000;
+    }
+
+    if (player.vida <= 0) {
+      return -1000000;
+    }
+
+    const playerBoardValue = getAiBoardValue(state, playerIndex);
+    const opponentBoardValue = getAiBoardValue(state, opponentIndex);
+    const playerHeroPressure = getAiHeroPressure(state, playerIndex);
+    const opponentHeroPressure = getAiHeroPressure(state, opponentIndex);
+    const playerHeroDefenders = getDefendersForTarget(state, playerIndex, "player").length;
+    const opponentHeroDefenders = getDefendersForTarget(state, opponentIndex, "player").length;
+
+    return ((player.vida - opponent.vida) * 12)
+      + ((playerBoardValue - opponentBoardValue) * 3)
+      + ((player.hand.length - opponent.hand.length) * 4)
+      + ((opponentHeroPressure - playerHeroPressure) * 6)
+      + ((playerHeroDefenders - opponentHeroDefenders) * 4)
+      + (player.manaAtual - opponent.manaAtual);
+  }
+
+  function getAiActionStableKey(action) {
+    return [
+      action.type,
+      action.cardInstanceId || "",
+      action.attackerInstanceId || "",
+      action.defenderInstanceId || "",
+      action.targetType || "",
+      action.targetPlayerIndex ?? "",
+      action.targetInstanceId || ""
+    ].join("|");
+  }
+
+  function getSmartAiActionBias(state, action, playerIndex) {
+    const opponentIndex = (playerIndex + 1) % 2;
+    const player = state.players[playerIndex];
+    const opponent = state.players[opponentIndex];
+    const heroPressure = getAiHeroPressure(state, playerIndex);
+    const opponentHeroPressure = getAiHeroPressure(state, opponentIndex);
+
+    if (action.type === "draw-card") {
+      return -8;
+    }
+
+    if (action.type === "end-turn") {
+      return -12;
+    }
+
+    if (action.type === "defend-target") {
+      if (action.targetType === "player") {
+        return heroPressure >= Math.max(6, player.vida - 6) ? 12 : -6;
+      }
+
+      return heroPressure >= Math.max(6, player.vida - 6) ? 3 : -8;
+    }
+
+    if (action.type === "attack-player") {
+      return opponentHeroPressure > heroPressure ? 10 : 4;
+    }
+
+    if (action.type === "effect-player") {
+      const effectCard = findCardByInstanceId(player.hand, action.cardInstanceId);
+      if (effectCard?.efeito === "dano_direto") {
+        return 8;
+      }
+
+      if (effectCard?.efeito === "cura_direta") {
+        return heroPressure >= Math.max(6, player.vida - 6) ? 10 : 2;
+      }
+    }
+
+    if (action.type === "effect-unit" || action.type === "attack-unit") {
+      const targetUnit = findCardByInstanceId(opponent.board, action.targetInstanceId);
+      return targetUnit ? (targetUnit.ataque * 5) + ((targetUnit.custo || 0) * 2) : 0;
+    }
+
+    if (action.type === "effect-ally-unit") {
+      const targetUnit = findCardByInstanceId(player.board, action.targetInstanceId);
+      return targetUnit ? ((targetUnit.custo || 0) * 2) + (targetUnit.ataque * 3) : 0;
+    }
+
+    if (action.type === "play-card") {
+      const card = findCardByInstanceId(player.hand, action.cardInstanceId);
+      if (!card) {
+        return 0;
+      }
+
+      if (card.categoria === "suporte" && card.efeito === "aura_ataque" && player.board.length > 0) {
+        return 12;
+      }
+
+      if (card.categoria === "suporte" && card.efeito === "cura_fim_turno" && player.vida < MAX_HEALTH) {
+        return 8;
+      }
+
+      if (card.categoria === "unidade") {
+        return (card.ataque * 3) + (card.vidaBase * 2) + (card.custo || 0);
+      }
+    }
+
+    return 0;
+  }
+
+  function enumerateSmartAiActions(state) {
+    if (!canAiTakeStep(state)) {
+      return [];
+    }
+
+    const player = getCurrentPlayer(state);
+    const opponent = getOpponentPlayer(state);
+    const playerIndex = state.currentPlayerIndex;
+    const opponentIndex = (playerIndex + 1) % 2;
+    const actions = [];
+    const playableCards = getAiPlayableCards(state);
+    const damageCards = playableCards.filter((card) => card.efeito === "dano_direto").sort(compareCardsByCostAsc);
+    const healingCards = playableCards.filter((card) => card.efeito === "cura_direta").sort(compareCardsByCostAsc);
+    const supportCards = playableCards.filter((card) => card.categoria === "suporte").sort(compareCardsByCostAsc);
+    const unitCards = playableCards.filter((card) => card.categoria === "unidade").sort(compareUnitsForAiPlay);
+    const readyAttackers = getAiReadyAttackers(state);
+    const attackableOpponentUnits = opponent.board.filter((unit) => !isCombatTargetProtected(state, "unit", opponentIndex, unit.instanceId));
+    const attackableSupports = opponent.board.length === 0
+      ? [...opponent.supportZone].sort(compareSupportsForAiTarget)
+      : [];
+    const opponentHeroProtected = isCombatTargetProtected(state, "player", opponentIndex);
+    const defendableUnits = player.board
+      .filter((unit) => canUnitEnterDefense(state, playerIndex, unit))
+      .sort(compareUnitsForAiDefense);
+    const defenseTargets = player.board
+      .filter((unit) => !unit.isDefending)
+      .sort(compareUnitsByThreatDesc);
+    const shouldConsiderDefense = getAiHeroPressure(state, playerIndex) >= Math.max(6, player.vida - 4)
+      || player.vida <= 12;
+
+    unitCards.forEach((card) => {
+      actions.push({
+        type: "play-card",
+        cardInstanceId: card.instanceId,
+        text: `IA baixou ${card.nome}.`
+      });
+    });
+
+    supportCards.forEach((card) => {
+      actions.push({
+        type: "play-card",
+        cardInstanceId: card.instanceId,
+        text: `IA ativou ${card.nome}.`
+      });
+    });
+
+    damageCards.forEach((card) => {
+      actions.push({
+        type: "effect-player",
+        cardInstanceId: card.instanceId,
+        text: `IA usou ${card.nome} em ${opponent.nome}.`
+      });
+
+      attackableOpponentUnits.forEach((unit) => {
+        actions.push({
+          type: "effect-unit",
+          cardInstanceId: card.instanceId,
+          targetInstanceId: unit.instanceId,
+          text: `IA usou ${card.nome} em ${unit.nome}.`
+        });
+      });
+    });
+
+    healingCards.forEach((card) => {
+      if (canPlayerReceiveHealing(player)) {
+        actions.push({
+          type: "effect-player",
+          cardInstanceId: card.instanceId,
+          text: `IA usou ${card.nome} em si mesma.`
+        });
+      }
+
+      getHealableUnits(player).sort(compareHealableUnits).forEach((unit) => {
+        actions.push({
+          type: "effect-ally-unit",
+          cardInstanceId: card.instanceId,
+          targetInstanceId: unit.instanceId,
+          text: `IA usou ${card.nome} em ${unit.nome}.`
+        });
+      });
+    });
+
+    readyAttackers.forEach((attacker) => {
+      if (!opponentHeroProtected) {
+        actions.push({
+          type: "attack-player",
+          attackerInstanceId: attacker.instanceId,
+          text: `IA atacou ${opponent.nome} com ${attacker.nome}.`
+        });
+      }
+
+      attackableOpponentUnits.forEach((unit) => {
+        actions.push({
+          type: "attack-unit",
+          attackerInstanceId: attacker.instanceId,
+          targetInstanceId: unit.instanceId,
+          text: `IA atacou ${unit.nome} com ${attacker.nome}.`
+        });
+      });
+
+      attackableSupports.forEach((support) => {
+        actions.push({
+          type: "attack-support",
+          attackerInstanceId: attacker.instanceId,
+          targetInstanceId: support.instanceId,
+          text: `IA destruiu ${support.nome} com ${attacker.nome}.`
+        });
+      });
+    });
+
+    if (shouldConsiderDefense) {
+      defendableUnits.forEach((unit) => {
+        actions.push({
+          type: "defend-target",
+          defenderInstanceId: unit.instanceId,
+          targetType: "player",
+          targetPlayerIndex: playerIndex,
+          targetInstanceId: null,
+          text: `IA colocou ${unit.nome} para defender ${player.nome}.`
+        });
+
+        defenseTargets.forEach((target) => {
+          if (target.instanceId === unit.instanceId) {
+            return;
+          }
+
+          actions.push({
+            type: "defend-target",
+            defenderInstanceId: unit.instanceId,
+            targetType: "unit",
+            targetPlayerIndex: playerIndex,
+            targetInstanceId: target.instanceId,
+            text: `IA colocou ${unit.nome} para defender ${target.nome}.`
+          });
+        });
+      });
+    }
+
+    if (getDrawPile(state, playerIndex).length > 0 && canAfford(player, DRAW_COST)) {
+      actions.push({
+        type: "draw-card",
+        text: "IA comprou uma carta."
+      });
+    }
+
+    actions.push({
+      type: "end-turn",
+      text: "IA encerrou o turno."
+    });
+
+    return actions;
+  }
+
+  function getSmartImmediateLethalAction(state) {
+    const playerIndex = state.currentPlayerIndex;
+    const player = getCurrentPlayer(state);
+    const opponent = getOpponentPlayer(state);
+    const opponentIndex = (playerIndex + 1) % 2;
+    const playableCards = getAiPlayableCards(state);
+    const damageCards = playableCards
+      .filter((card) => card.efeito === "dano_direto")
+      .sort((left, right) => (right.valor - left.valor) || compareCardsByCostAsc(left, right));
+    const readyAttackers = getAiReadyAttackers(state).sort(compareAttackersByPowerDesc(player));
+    const opponentHeroProtected = isCombatTargetProtected(state, "player", opponentIndex);
+    const totalDamageFromCards = damageCards.reduce((total, card) => total + (card.valor || 0), 0);
+    const totalDamageFromAttackers = opponentHeroProtected
+      ? 0
+      : readyAttackers.reduce((total, attacker) => total + getUnitAttack(attacker, player), 0);
+
+    if ((totalDamageFromCards + totalDamageFromAttackers) < opponent.vida) {
+      return null;
+    }
+
+    const directLethalCard = damageCards.find((card) => (card.valor || 0) >= opponent.vida);
+    if (directLethalCard) {
+      return {
+        type: "effect-player",
+        cardInstanceId: directLethalCard.instanceId,
+        text: `IA usou ${directLethalCard.nome} em ${opponent.nome}.`
+      };
+    }
+
+    if (!opponentHeroProtected) {
+      const directLethalAttacker = readyAttackers.find((attacker) => getUnitAttack(attacker, player) >= opponent.vida);
+      if (directLethalAttacker) {
+        return {
+          type: "attack-player",
+          attackerInstanceId: directLethalAttacker.instanceId,
+          text: `IA atacou ${opponent.nome} com ${directLethalAttacker.nome}.`
+        };
+      }
+
+      if (readyAttackers[0]) {
+        return {
+          type: "attack-player",
+          attackerInstanceId: readyAttackers[0].instanceId,
+          text: `IA atacou ${opponent.nome} com ${readyAttackers[0].nome}.`
+        };
+      }
+    }
+
+    if (damageCards[0]) {
+      return {
+        type: "effect-player",
+        cardInstanceId: damageCards[0].instanceId,
+        text: `IA usou ${damageCards[0].nome} em ${opponent.nome}.`
+      };
+    }
+
+    return null;
+  }
+
+  function getSmartHeroStabilizationAction(state) {
+    const playerIndex = state.currentPlayerIndex;
+    const player = getCurrentPlayer(state);
+    const opponent = getOpponentPlayer(state);
+    const incomingThreat = opponent.board
+      .filter((unit) => !unit.isDefending)
+      .reduce((total, unit) => total + getUnitAttack(unit, opponent), 0);
+
+    if (incomingThreat < (player.vida - 2)) {
+      return null;
+    }
+
+    const playableCards = getAiPlayableCards(state);
+    const healingCards = playableCards
+      .filter((card) => card.efeito === "cura_direta")
+      .sort((left, right) => (right.valor - left.valor) || compareCardsByCostAsc(left, right));
+    const safeHealingCard = healingCards.find((card) => canPlayerReceiveHealing(player) && Math.min(MAX_HEALTH, player.vida + (card.valor || 0)) > incomingThreat);
+    if (safeHealingCard) {
+      return {
+        type: "effect-player",
+        cardInstanceId: safeHealingCard.instanceId,
+        text: `IA usou ${safeHealingCard.nome} em si mesma.`
+      };
+    }
+
+    return null;
+  }
+
+  function getNextSmartAiAction(state, options = {}) {
+    if (!canAiTakeStep(state, { ignorePause: options.ignorePause === true })) {
+      return null;
+    }
+
+    const baseAction = getNextBaseAiAction(state, options);
+    const immediateLethalAction = getSmartImmediateLethalAction(state);
+    if (immediateLethalAction) {
+      return immediateLethalAction;
+    }
+
+    const stabilizationAction = getSmartHeroStabilizationAction(state);
+    if (stabilizationAction) {
+      return stabilizationAction;
+    }
+
+    const playerIndex = state.currentPlayerIndex;
+    const player = getCurrentPlayer(state);
+    const opponent = getOpponentPlayer(state);
+    const opponentIndex = (playerIndex + 1) % 2;
+    const incomingThreat = opponent.board
+      .filter((unit) => !unit.isDefending)
+      .reduce((total, unit) => total + getUnitAttack(unit, opponent), 0);
+    const defendableUnits = player.board
+      .filter((unit) => canUnitEnterDefense(state, playerIndex, unit))
+      .sort(compareUnitsForAiDefense);
+    const readyAttackers = getAiReadyAttackers(state).sort(compareAttackersByPowerDesc(player));
+    const totalReadyDamage = readyAttackers.reduce((total, attacker) => total + getUnitAttack(attacker, player), 0);
+    const totalDirectDamage = getAiPlayableCards(state)
+      .filter((card) => card.efeito === "dano_direto")
+      .reduce((total, card) => total + (card.valor || 0), 0);
+    const opponentHeroProtected = isCombatTargetProtected(state, "player", opponentIndex);
+
+    if (
+      baseAction
+      && incomingThreat >= (player.vida - 1)
+      && defendableUnits[0]
+      && ["draw-card", "end-turn", "play-card", "effect-ally-unit"].includes(baseAction.type)
+    ) {
+      return {
+        type: "defend-target",
+        defenderInstanceId: defendableUnits[0].instanceId,
+        targetType: "player",
+        targetPlayerIndex: playerIndex,
+        targetInstanceId: null,
+        text: `IA colocou ${defendableUnits[0].nome} para defender ${player.nome}.`
+      };
+    }
+
+    if (
+      baseAction
+      && !opponentHeroProtected
+      && readyAttackers[0]
+      && (incomingThreat + 4) < player.vida
+      && (totalReadyDamage + totalDirectDamage) >= Math.max(8, opponent.vida - 2)
+      && ["play-card", "draw-card", "end-turn"].includes(baseAction.type)
+    ) {
+      return {
+        type: "attack-player",
+        attackerInstanceId: readyAttackers[0].instanceId,
+        text: `IA atacou ${opponent.nome} com ${readyAttackers[0].nome}.`
+      };
+    }
+
+    if (baseAction?.type === "attack-unit" && !opponentHeroProtected) {
+      const attacker = findCardByInstanceId(player.board, baseAction.attackerInstanceId);
+      const target = findCardByInstanceId(opponent.board, baseAction.targetInstanceId);
+      const attackDamage = attacker ? getUnitAttack(attacker, player) : 0;
+      const wouldKillTarget = target ? getMitigatedDamage(target, attackDamage) >= target.vida : false;
+      const nearLethalRace = totalReadyDamage >= Math.max(8, opponent.vida - 4);
+
+      if (!wouldKillTarget && nearLethalRace && attacker) {
+        return {
+          type: "attack-player",
+          attackerInstanceId: attacker.instanceId,
+          text: `IA atacou ${opponent.nome} com ${attacker.nome}.`
+        };
+      }
+    }
+
+    return baseAction || {
+      type: "end-turn",
+      text: "IA encerrou o turno."
+    };
   }
 
   function getNextBaseAiAction(state, options = {}) {
@@ -2779,7 +3332,7 @@
     }
 
     if (normalizedController === PLAYER_CONTROLLER_TYPES.AI_SMART) {
-      return getNextBaseAiAction(state, options);
+      return getNextSmartAiAction(state, options);
     }
 
     return getNextBaseAiAction(state, options);
@@ -2916,7 +3469,7 @@
         state.headlessBatchCurrentMatchNumber = state.headlessBatchCompletedCount + 1;
         state.headlessBatchMatchState = createHeadlessBatchMatchState(state);
         state.headlessBatchCurrentMatchActionCount = 0;
-        state.aiStepText = `Simulando partida ${state.headlessBatchCurrentMatchNumber} de ${state.headlessBatchRequestedCount}.`;
+        state.aiStepText = `Simulando partida ${state.headlessBatchCurrentMatchNumber} de ${getHeadlessBatchTotalMatchCount(state)}.`;
       }
 
       const matchState = state.headlessBatchMatchState;
@@ -4931,20 +5484,43 @@
     return "Encerrada";
   }
 
+  function getHeadlessBatchComparisonControllers(state) {
+    const controllers = normalizePlayerControllers(state?.playerControllers);
+    return isHeadlessAiComparisonMode(state)
+      ? controllers
+      : [PLAYER_CONTROLLER_TYPES.AI_BASE, PLAYER_CONTROLLER_TYPES.AI_SMART];
+  }
+
+  function getHeadlessBatchComparisonLabel(state) {
+    const comparisonControllers = getHeadlessBatchComparisonControllers(state);
+    return `${getControllerDisplayLabel(comparisonControllers[0])} x ${getControllerDisplayLabel(comparisonControllers[1])}`;
+  }
+
   function getHeadlessAiSummaryText(state) {
+    const comparisonControllers = getHeadlessBatchComparisonControllers(state);
     if (state.headlessBatchStatus === HEADLESS_BATCH_STATUSES.RUNNING) {
-      return `Simulando bateria IA x IA. Partida atual: ${state.headlessBatchCurrentMatchNumber || 1} de ${state.headlessBatchRequestedCount}.`;
+      return isHeadlessAiComparisonMode(state)
+        ? `Comparando ${getHeadlessBatchComparisonLabel(state)}.`
+        : `Simulando bateria IA x IA. Partida atual: ${state.headlessBatchCurrentMatchNumber || 1} de ${getHeadlessBatchTotalMatchCount(state)}.`;
     }
 
     if (state.headlessBatchStatus === HEADLESS_BATCH_STATUSES.FAILED) {
       return "A bateria foi interrompida antes de concluir todas as partidas.";
     }
 
-    return `Placar final: Sentinela Azul ${state.headlessBatchWins[0]} x ${state.headlessBatchWins[1]} Guardiao Rubro.`;
+    if (isHeadlessAiComparisonMode(state)) {
+      return `Placar geral: ${getControllerDisplayLabel(comparisonControllers[0])} ${state.headlessBatchControllerWins[comparisonControllers[0]] || 0} x ${state.headlessBatchControllerWins[comparisonControllers[1]] || 0} ${getControllerDisplayLabel(comparisonControllers[1])}.`;
+    }
+
+    return `Placar final: Jogador 1 ${state.headlessBatchWins[0]} x ${state.headlessBatchWins[1]} Jogador 2.`;
   }
 
   function getHeadlessAiProgressText(state) {
-    return `${state.headlessBatchCompletedCount}/${state.headlessBatchRequestedCount}`;
+    if (isHeadlessAiComparisonMode(state)) {
+      return `${Math.floor(state.headlessBatchCompletedCount / 2)}/${state.headlessBatchPairCountRequested} pares · ${state.headlessBatchCompletedCount}/${getHeadlessBatchTotalMatchCount(state)} partidas`;
+    }
+
+    return `${state.headlessBatchCompletedCount}/${state.headlessBatchRequestedCount} partidas`;
   }
 
   function renderHeadlessAiPanel(state) {
@@ -4953,12 +5529,18 @@
     const status = document.getElementById("headless-ai-status");
     const copy = document.getElementById("headless-ai-copy");
     const progress = document.getElementById("headless-ai-progress");
+    const controllerPrimaryStat = document.getElementById("headless-ai-controller-primary-stat");
+    const controllerPrimaryLabel = document.getElementById("headless-ai-controller-primary-label");
+    const controllerPrimaryWins = document.getElementById("headless-ai-controller-primary-wins");
+    const controllerSecondaryStat = document.getElementById("headless-ai-controller-secondary-stat");
+    const controllerSecondaryLabel = document.getElementById("headless-ai-controller-secondary-label");
+    const controllerSecondaryWins = document.getElementById("headless-ai-controller-secondary-wins");
     const playerOneWins = document.getElementById("headless-ai-player-1-wins");
     const playerTwoWins = document.getElementById("headless-ai-player-2-wins");
     const summary = document.getElementById("headless-ai-summary");
     const error = document.getElementById("headless-ai-error");
 
-    if (!panel || !title || !status || !copy || !progress || !playerOneWins || !playerTwoWins || !summary || !error) {
+    if (!panel || !title || !status || !copy || !progress || !controllerPrimaryStat || !controllerPrimaryLabel || !controllerPrimaryWins || !controllerSecondaryStat || !controllerSecondaryLabel || !controllerSecondaryWins || !playerOneWins || !playerTwoWins || !summary || !error) {
       return;
     }
 
@@ -4970,14 +5552,25 @@
     }
 
     const running = state.isHeadlessSimulationRunning;
+    const comparisonControllers = getHeadlessBatchComparisonControllers(state);
     title.textContent = running ? "Simulacao IA x IA" : "Resultado da simulacao";
     status.textContent = getHeadlessAiStatusText(state);
     copy.textContent = running
-      ? "Simulando uma bateria IA x IA sem tabuleiro. O placar parcial e atualizado automaticamente."
+      ? isHeadlessAiComparisonMode(state)
+        ? `Comparando ${getHeadlessBatchComparisonLabel(state)} em pares espelhados, sem tabuleiro.`
+        : "Simulando uma bateria IA x IA sem tabuleiro. O placar parcial e atualizado automaticamente."
       : state.headlessBatchStatus === HEADLESS_BATCH_STATUSES.FAILED
         ? "A bateria falhou antes de concluir todas as partidas."
-        : "A bateria terminou. Confira abaixo quantas partidas cada lado venceu.";
+        : isHeadlessAiComparisonMode(state)
+          ? `A comparacao ${getHeadlessBatchComparisonLabel(state)} terminou. Confira abaixo as vitorias por IA e por lado.`
+          : "A bateria terminou. Confira abaixo quantas partidas cada lado venceu.";
     progress.textContent = getHeadlessAiProgressText(state);
+    controllerPrimaryLabel.textContent = getControllerDisplayLabel(comparisonControllers[0]);
+    controllerPrimaryWins.textContent = String(state.headlessBatchControllerWins[comparisonControllers[0]] || 0);
+    controllerSecondaryLabel.textContent = getControllerDisplayLabel(comparisonControllers[1]);
+    controllerSecondaryWins.textContent = String(state.headlessBatchControllerWins[comparisonControllers[1]] || 0);
+    controllerPrimaryStat.hidden = !isHeadlessAiComparisonMode(state);
+    controllerSecondaryStat.hidden = !isHeadlessAiComparisonMode(state);
     playerOneWins.textContent = String(state.headlessBatchWins[0]);
     playerTwoWins.textContent = String(state.headlessBatchWins[1]);
     summary.textContent = getHeadlessAiSummaryText(state);
@@ -5113,6 +5706,7 @@
     const startButton = document.getElementById("start-button");
     const simulateAiMatchButton = document.getElementById("simulate-ai-match-button");
     const simulateAiMatchCountPicker = document.getElementById("simulate-ai-match-count-picker");
+    const simulateAiMatchCountLabel = document.getElementById("simulate-ai-match-count-label");
     const simulateAiMatchCountInput = document.getElementById("simulate-ai-match-count");
     const restartButton = document.getElementById("restart-button");
     const aiMatchStrip = document.getElementById("ai-match-strip");
@@ -5149,7 +5743,8 @@
     [0, 1].forEach((playerIndex) => {
       const selectedController = normalizePlayerControllers(state.playerControllers)[playerIndex];
       const humanButton = document.getElementById(`player-${playerIndex + 1}-controller-human`);
-      const aiButton = document.getElementById(`player-${playerIndex + 1}-controller-ai`);
+      const aiBaseButton = document.getElementById(`player-${playerIndex + 1}-controller-ai-base`);
+      const aiSmartButton = document.getElementById(`player-${playerIndex + 1}-controller-ai-smart`);
 
       if (humanButton) {
         const isSelected = selectedController === PLAYER_CONTROLLER_TYPES.HUMAN;
@@ -5158,11 +5753,18 @@
         humanButton.setAttribute("aria-pressed", String(isSelected));
       }
 
-      if (aiButton) {
-        const isSelected = selectedController === PLAYER_CONTROLLER_TYPES.AI;
-        aiButton.disabled = state.isMatchStarted;
-        aiButton.classList.toggle("is-selected", isSelected);
-        aiButton.setAttribute("aria-pressed", String(isSelected));
+      if (aiBaseButton) {
+        const isSelected = selectedController === PLAYER_CONTROLLER_TYPES.AI_BASE;
+        aiBaseButton.disabled = state.isMatchStarted;
+        aiBaseButton.classList.toggle("is-selected", isSelected);
+        aiBaseButton.setAttribute("aria-pressed", String(isSelected));
+      }
+
+      if (aiSmartButton) {
+        const isSelected = selectedController === PLAYER_CONTROLLER_TYPES.AI_SMART;
+        aiSmartButton.disabled = state.isMatchStarted;
+        aiSmartButton.classList.toggle("is-selected", isSelected);
+        aiSmartButton.setAttribute("aria-pressed", String(isSelected));
       }
     });
 
@@ -5175,6 +5777,11 @@
       simulateAiMatchCountPicker.hidden = !headlessSimulationReady;
       simulateAiMatchCountInput.disabled = !headlessSimulationReady;
       simulateAiMatchCountInput.value = String(normalizeHeadlessBatchCount(state.headlessBatchRequestedCount));
+      if (simulateAiMatchCountLabel) {
+        simulateAiMatchCountLabel.textContent = headlessSimulationReady && normalizePlayerControllers(state.playerControllers)[0] !== normalizePlayerControllers(state.playerControllers)[1]
+          ? "Pares espelhados da comparacao"
+          : "Partidas da simulacao";
+      }
     }
 
     if (simulateAiMatchButton) {
@@ -5652,6 +6259,7 @@
       cancelPendingAction,
       handleShortcutAction,
       getNextBaseAiAction,
+      getNextSmartAiAction,
       getNextAiActionForController,
       getNextAiAction,
       executeAiAction,
