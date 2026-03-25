@@ -37,6 +37,7 @@
     SIMPLE: "simple",
     MIRRORED_COMPARE: "mirrored-compare"
   });
+  const PLAYER_DISPLAY_NAMES = ["Sentinela Azul", "Guardiao Rubro"];
   const LOG_VALIDATION_STATUS = Object.freeze({
     IDLE: "idle",
     VALID: "valid",
@@ -65,6 +66,13 @@
   let aiTurnTimerId = null;
   let headlessSimulationTimerId = null;
   let nextMatchId = 1;
+
+  function createHeadlessBatchStarterResults() {
+    return {
+      [PLAYER_CONTROLLER_TYPES.AI_BASE]: { wins: 0, losses: 0 },
+      [PLAYER_CONTROLLER_TYPES.AI_SMART]: { wins: 0, losses: 0 }
+    };
+  }
 
   const CARD_LIBRARY = [
     {
@@ -786,6 +794,7 @@
         [PLAYER_CONTROLLER_TYPES.AI_BASE]: 0,
         [PLAYER_CONTROLLER_TYPES.AI_SMART]: 0
       },
+      headlessBatchStarterResults: createHeadlessBatchStarterResults(),
       headlessBatchSeatWins: [0, 0],
       headlessBatchMode: HEADLESS_BATCH_MODES.SIMPLE,
       headlessBatchPairCountRequested: 0,
@@ -827,8 +836,8 @@
       logValidationCopyFeedback: null,
       logValidationCopyFeedbackStatus: null,
       players: [
-        createPlayer(1, "Sentinela Azul"),
-        createPlayer(2, "Guardiao Rubro")
+        createPlayer(1, PLAYER_DISPLAY_NAMES[0]),
+        createPlayer(2, PLAYER_DISPLAY_NAMES[1])
       ]
     };
   }
@@ -1129,6 +1138,7 @@
         [PLAYER_CONTROLLER_TYPES.AI_BASE]: 0,
         [PLAYER_CONTROLLER_TYPES.AI_SMART]: 0
       },
+      headlessBatchStarterResults: createHeadlessBatchStarterResults(),
       headlessBatchSeatWins: [0, 0],
       headlessBatchMode: HEADLESS_BATCH_MODES.SIMPLE,
       headlessBatchPairCountRequested: 0,
@@ -2345,6 +2355,7 @@
       [PLAYER_CONTROLLER_TYPES.AI_BASE]: 0,
       [PLAYER_CONTROLLER_TYPES.AI_SMART]: 0
     };
+    state.headlessBatchStarterResults = createHeadlessBatchStarterResults();
     state.headlessBatchSeatWins = [0, 0];
     state.headlessBatchMode = HEADLESS_BATCH_MODES.SIMPLE;
     state.headlessBatchPairCountRequested = 0;
@@ -2461,6 +2472,7 @@
       [PLAYER_CONTROLLER_TYPES.AI_BASE]: 0,
       [PLAYER_CONTROLLER_TYPES.AI_SMART]: 0
     };
+    nextState.headlessBatchStarterResults = createHeadlessBatchStarterResults();
     nextState.headlessBatchSeatWins = [0, 0];
     nextState.headlessBatchRandomFn = typeof options.rng === "function"
       ? options.rng
@@ -2504,9 +2516,17 @@
     state.headlessBatchCompletedCount += 1;
     state.headlessBatchWins[matchState.winner.id - 1] += 1;
     state.headlessBatchSeatWins[matchState.winner.id - 1] += 1;
+    const startingController = getAiControllerForPlayer(matchState, 0);
     const winningController = getAiControllerForPlayer(matchState, matchState.winner.id - 1);
     if (isAiControllerType(winningController)) {
       state.headlessBatchControllerWins[winningController] = (state.headlessBatchControllerWins[winningController] || 0) + 1;
+    }
+    if (isAiControllerType(startingController) && state.headlessBatchStarterResults[startingController]) {
+      if (winningController === startingController) {
+        state.headlessBatchStarterResults[startingController].wins += 1;
+      } else {
+        state.headlessBatchStarterResults[startingController].losses += 1;
+      }
     }
     state.headlessBatchMatchState = null;
     state.headlessBatchCurrentMatchActionCount = 0;
@@ -5512,7 +5532,7 @@
       return `Placar geral: ${getControllerDisplayLabel(comparisonControllers[0])} ${state.headlessBatchControllerWins[comparisonControllers[0]] || 0} x ${state.headlessBatchControllerWins[comparisonControllers[1]] || 0} ${getControllerDisplayLabel(comparisonControllers[1])}.`;
     }
 
-    return `Placar final: Jogador 1 ${state.headlessBatchWins[0]} x ${state.headlessBatchWins[1]} Jogador 2.`;
+    return `Placar final: ${PLAYER_DISPLAY_NAMES[0]} ${state.headlessBatchWins[0]} x ${state.headlessBatchWins[1]} ${PLAYER_DISPLAY_NAMES[1]}.`;
   }
 
   function getHeadlessAiProgressText(state) {
@@ -5521,6 +5541,15 @@
     }
 
     return `${state.headlessBatchCompletedCount}/${state.headlessBatchRequestedCount} partidas`;
+  }
+
+  function getHeadlessStarterRecordText(state, controllerType) {
+    const record = state.headlessBatchStarterResults?.[controllerType];
+    if (!record) {
+      return "";
+    }
+
+    return `${getControllerDisplayLabel(controllerType)} começou: ${record.wins} vitorias e ${record.losses} derrotas`;
   }
 
   function renderHeadlessAiPanel(state) {
@@ -5537,10 +5566,12 @@
     const controllerSecondaryWins = document.getElementById("headless-ai-controller-secondary-wins");
     const playerOneWins = document.getElementById("headless-ai-player-1-wins");
     const playerTwoWins = document.getElementById("headless-ai-player-2-wins");
+    const smartStarterRecord = document.getElementById("headless-ai-smart-start-record");
+    const baseStarterRecord = document.getElementById("headless-ai-base-start-record");
     const summary = document.getElementById("headless-ai-summary");
     const error = document.getElementById("headless-ai-error");
 
-    if (!panel || !title || !status || !copy || !progress || !controllerPrimaryStat || !controllerPrimaryLabel || !controllerPrimaryWins || !controllerSecondaryStat || !controllerSecondaryLabel || !controllerSecondaryWins || !playerOneWins || !playerTwoWins || !summary || !error) {
+    if (!panel || !title || !status || !copy || !progress || !controllerPrimaryStat || !controllerPrimaryLabel || !controllerPrimaryWins || !controllerSecondaryStat || !controllerSecondaryLabel || !controllerSecondaryWins || !playerOneWins || !playerTwoWins || !smartStarterRecord || !baseStarterRecord || !summary || !error) {
       return;
     }
 
@@ -5573,6 +5604,10 @@
     controllerSecondaryStat.hidden = !isHeadlessAiComparisonMode(state);
     playerOneWins.textContent = String(state.headlessBatchWins[0]);
     playerTwoWins.textContent = String(state.headlessBatchWins[1]);
+    smartStarterRecord.hidden = !isHeadlessAiComparisonMode(state);
+    baseStarterRecord.hidden = !isHeadlessAiComparisonMode(state);
+    smartStarterRecord.textContent = getHeadlessStarterRecordText(state, PLAYER_CONTROLLER_TYPES.AI_SMART);
+    baseStarterRecord.textContent = getHeadlessStarterRecordText(state, PLAYER_CONTROLLER_TYPES.AI_BASE);
     summary.textContent = getHeadlessAiSummaryText(state);
     error.hidden = !state.headlessBatchErrorMessage;
     error.textContent = state.headlessBatchErrorMessage || "";

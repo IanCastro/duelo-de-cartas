@@ -704,6 +704,8 @@ test("headless ai comparison batch mirrors seats and tracks controller wins", ()
   assert(state.headlessBatchCompletedCount === 6, "mirrored comparison should run two matches per requested pair");
   assert(controllerWins === 6, "controller wins should account for every mirrored comparison match");
   assert(state.headlessBatchSeatWins[0] + state.headlessBatchSeatWins[1] === 6, "seat wins should still account for every mirrored comparison match");
+  assert(state.headlessBatchStarterResults[game.PLAYER_CONTROLLER_TYPES.AI_BASE].wins + state.headlessBatchStarterResults[game.PLAYER_CONTROLLER_TYPES.AI_BASE].losses === 3, "the base ai should track its own started-first wins and losses");
+  assert(state.headlessBatchStarterResults[game.PLAYER_CONTROLLER_TYPES.AI_SMART].wins + state.headlessBatchStarterResults[game.PLAYER_CONTROLLER_TYPES.AI_SMART].losses === 3, "the smart ai should track its own started-first wins and losses");
   assert(state.matchHistory.length === 0, "mirrored comparison should not create persistent history entries");
   assert(state.aiStepText === "Comparacao IA x IA concluida.", "mirrored comparison should end with the dedicated completion status");
 });
@@ -2425,6 +2427,10 @@ test("layout markup removes the cancel button and keeps a pending effect slot", 
   assert(html.includes("id=\"player-1-controller-ai-smart\""), "the config panel should expose the smart ai option for player 1");
   assert(html.includes("id=\"player-2-controller-ai-base\""), "the config panel should expose the base ai option for player 2");
   assert(html.includes("id=\"player-2-controller-ai-smart\""), "the config panel should expose the smart ai option for player 2");
+  assert(html.includes(">Sentinela Azul<"), "the interface should expose Sentinela Azul instead of the old player 1 label");
+  assert(html.includes(">Guardiao Rubro<"), "the interface should expose Guardiao Rubro instead of the old player 2 label");
+  assert(!html.includes(">Jogador 1<"), "the interface should no longer render the Jogador 1 label");
+  assert(!html.includes(">Jogador 2<"), "the interface should no longer render the Jogador 2 label");
   assert(html.includes("id=\"deck-mode-separate\""), "the config panel should expose a separate-deck toggle");
   assert(html.includes("id=\"deck-mode-shared\""), "the config panel should expose a shared-deck toggle");
   assert(html.includes("id=\"simulate-ai-match-count\""), "the config panel should expose a numeric input for ai-vs-ai batch size");
@@ -2436,6 +2442,8 @@ test("layout markup removes the cancel button and keeps a pending effect slot", 
   assert(html.includes("id=\"headless-ai-controller-secondary-stat\""), "the headless ai-vs-ai panel should expose the second ai comparison stat");
   assert(html.includes("id=\"headless-ai-player-1-wins\""), "the headless ai-vs-ai panel should expose the first side scoreboard");
   assert(html.includes("id=\"headless-ai-player-2-wins\""), "the headless ai-vs-ai panel should expose the second side scoreboard");
+  assert(html.includes("id=\"headless-ai-smart-start-record\""), "the headless ai-vs-ai panel should expose the smart ai started-first summary");
+  assert(html.includes("id=\"headless-ai-base-start-record\""), "the headless ai-vs-ai panel should expose the base ai started-first summary");
   assert(html.includes("id=\"headless-ai-error\""), "the headless ai-vs-ai panel should expose an error slot for failed batches");
   assert(!html.includes("id=\"headless-ai-log\""), "the headless ai-vs-ai panel should no longer expose a final detailed log container");
   assert(html.includes("id=\"player-1-deck-stat\""), "player panels should expose per-player deck stats");
@@ -2456,6 +2464,7 @@ test("layout markup removes the cancel button and keeps a pending effect slot", 
   assert(html.includes("compact-action-button"), "turn action buttons should use the compact button style");
   assert(html.includes("pressione Esc para voltar ao presente"), "rules should describe how to leave history view without dedicated buttons");
   assert(html.includes("so comeca quando voce clicar em Start"), "rules should describe the pre-game Start flow");
+  assert(html.includes("Sentinela Azul e Guardiao Rubro serao controlados"), "rules should describe the controller choices using the player names");
   assert(html.includes("configuracao fica travada"), "rules should explain that Humano/IA choices lock after Start");
   assert(html.includes("default e Separado"), "rules should describe the default separate deck mode");
   assert(html.includes("fica deitada"), "rules should describe the defense stance visuals");
