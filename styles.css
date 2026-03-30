@@ -204,6 +204,32 @@ select {
   border-color: rgba(244, 184, 96, 0.42);
 }
 
+.controller-text-input {
+  width: 100%;
+  min-width: 0;
+  padding: 10px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text);
+  font: inherit;
+}
+
+.controller-text-input:focus {
+  outline: 2px solid rgba(244, 184, 96, 0.45);
+  outline-offset: 2px;
+  border-color: rgba(244, 184, 96, 0.42);
+}
+
+.controller-text-input:disabled {
+  opacity: 0.62;
+  cursor: not-allowed;
+}
+
+.alias-picker-label {
+  margin-top: 2px;
+}
+
 .eyebrow {
   margin: 0 0 8px;
   font-size: 0.8rem;
@@ -375,6 +401,43 @@ select {
 
 .board.is-ai-turn .player-turn-actions {
   opacity: 0.72;
+}
+
+.history-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin: 12px 0 14px;
+  flex-wrap: wrap;
+}
+
+.history-tabs {
+  display: inline-flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.history-match-actions {
+  display: inline-flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.remote-history-sync-feedback {
+  margin-bottom: 12px;
+  color: var(--muted);
+  line-height: 1.45;
+}
+
+.remote-history-sync-feedback.is-error {
+  color: #ffb0a8;
+}
+
+.log-entry.is-read-only {
+  cursor: default;
+  opacity: 0.94;
 }
 
 .player-summary {

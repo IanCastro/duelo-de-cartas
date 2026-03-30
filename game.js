@@ -13,6 +13,7 @@
   const HEADLESS_AI_MATCH_ACTION_LIMIT = 4000;
   const MATCH_HISTORY_STORAGE_KEY = "duelo-de-cartas-match-history-v1";
   const MAX_SAVED_MATCHES = 20;
+  const APP_VERSION = "2026.03.30";
   const MATCH_PRESENTATION_MODES = Object.freeze({
     VISUAL: "visual",
     HEADLESS_AI_VS_AI: "headless-ai-vs-ai"
@@ -37,6 +38,28 @@
     SIMPLE: "simple",
     MIRRORED_COMPARE: "mirrored-compare"
   });
+  const MATCH_KINDS = Object.freeze({
+    HUMAN_HUMAN: "human-human",
+    HUMAN_AI: "human-ai",
+    AI_AI: "ai-ai"
+  });
+  const REMOTE_MATCH_SYNC_STATUSES = Object.freeze({
+    PENDING: "pending",
+    SYNCED: "synced",
+    FAILED: "failed"
+  });
+  const HISTORY_VIEW_MODES = Object.freeze({
+    LOCAL: "local",
+    REMOTE: "remote"
+  });
+  const REMOTE_MATCH_HISTORY_LOAD_STATUSES = Object.freeze({
+    IDLE: "idle",
+    LOADING: "loading",
+    READY: "ready",
+    FAILED: "failed"
+  });
+  const REMOTE_MATCH_HISTORY_TABLE = "played_matches";
+  const REMOTE_MATCH_HISTORY_FETCH_LIMIT = 50;
   const PLAYER_DISPLAY_NAMES = ["Sentinela Azul", "Guardiao Rubro"];
   const LOG_VALIDATION_STATUS = Object.freeze({
     IDLE: "idle",
@@ -62,6 +85,7 @@
   });
 
   let sessionPlayerControllers = [PLAYER_CONTROLLER_TYPES.HUMAN, PLAYER_CONTROLLER_TYPES.AI_BASE];
+  let sessionHumanAliases = ["", ""];
   let sessionDeckMode = DECK_MODES.SEPARATE;
   let aiTurnTimerId = null;
   let headlessSimulationTimerId = null;
@@ -213,6 +237,124 @@
     ];
   }
 
+  function getDefaultHumanAlias(playerIndex) {
+    return playerIndex === 0 ? "Humano Azul" : "Humano Rubro";
+  }
+
+  function normalizeHumanAlias(alias) {
+    if (typeof alias !== "string") {
+      return "";
+    }
+
+    return alias.trim().slice(0, 40);
+  }
+
+  function normalizeHumanAliases(aliases) {
+    const source = Array.isArray(aliases) ? aliases : sessionHumanAliases;
+    return [
+      normalizeHumanAlias(source[0]),
+      normalizeHumanAlias(source[1])
+    ];
+  }
+
+  function getSessionHumanAliases() {
+    return [...sessionHumanAliases];
+  }
+
+  function setSessionHumanAliases(aliases) {
+    sessionHumanAliases = normalizeHumanAliases(aliases);
+    return getSessionHumanAliases();
+  }
+
+  function setSessionHumanAlias(playerIndex, alias) {
+    if (playerIndex !== 0 && playerIndex !== 1) {
+      return getSessionHumanAliases();
+    }
+
+    const nextAliases = getSessionHumanAliases();
+    nextAliases[playerIndex] = normalizeHumanAlias(alias);
+    return setSessionHumanAliases(nextAliases);
+  }
+
+  function hasHumanPlayer(controllers) {
+    return normalizePlayerControllers(controllers).some((controller) => normalizePlayerController(controller) === PLAYER_CONTROLLER_TYPES.HUMAN);
+  }
+
+  function getMatchKind(controllers) {
+    const normalizedControllers = normalizePlayerControllers(controllers);
+    const humanCount = normalizedControllers.filter((controller) => normalizePlayerController(controller) === PLAYER_CONTROLLER_TYPES.HUMAN).length;
+
+    if (humanCount === 2) {
+      return MATCH_KINDS.HUMAN_HUMAN;
+    }
+
+    if (humanCount === 1) {
+      return MATCH_KINDS.HUMAN_AI;
+    }
+
+    return MATCH_KINDS.AI_AI;
+  }
+
+  function getMatchKindLabel(matchKind) {
+    if (matchKind === MATCH_KINDS.HUMAN_HUMAN) {
+      return "Humano x Humano";
+    }
+
+    if (matchKind === MATCH_KINDS.HUMAN_AI) {
+      return "Humano x IA";
+    }
+
+    return "IA x IA";
+  }
+
+  function getEffectiveHumanAliases(humanAliases, controllers) {
+    const normalizedControllers = normalizePlayerControllers(controllers);
+    const normalizedAliases = normalizeHumanAliases(humanAliases);
+
+    return normalizedControllers.map((controller, playerIndex) => {
+      if (normalizePlayerController(controller) !== PLAYER_CONTROLLER_TYPES.HUMAN) {
+        return null;
+      }
+
+      return normalizedAliases[playerIndex] || getDefaultHumanAlias(playerIndex);
+    });
+  }
+
+  function getRemoteHistoryConfig(options = {}) {
+    const source = options.remoteHistoryConfig
+      || (typeof window !== "undefined" ? window.DUELO_REMOTE_HISTORY_CONFIG : null)
+      || {};
+    const url = typeof source.SUPABASE_URL === "string"
+      ? source.SUPABASE_URL.trim().replace(/\/+$/, "")
+      : "";
+    const anonKey = typeof source.SUPABASE_ANON_KEY === "string"
+      ? source.SUPABASE_ANON_KEY.trim()
+      : "";
+    const enabled = Boolean(source.REMOTE_MATCH_HISTORY_ENABLED && url && anonKey);
+
+    return {
+      enabled,
+      url,
+      anonKey
+    };
+  }
+
+  function getRemoteSyncStatusLabel(syncStatus) {
+    if (syncStatus === REMOTE_MATCH_SYNC_STATUSES.SYNCED) {
+      return "Sincronizado";
+    }
+
+    if (syncStatus === REMOTE_MATCH_SYNC_STATUSES.FAILED) {
+      return "Falhou";
+    }
+
+    if (syncStatus === REMOTE_MATCH_SYNC_STATUSES.PENDING) {
+      return "Pendente";
+    }
+
+    return "Nao enviado";
+  }
+
   function getControllerDisplayLabel(controller) {
     const normalizedController = normalizePlayerController(controller);
     if (normalizedController === PLAYER_CONTROLLER_TYPES.AI_SMART) {
@@ -308,7 +450,25 @@
       log: cloneLogEntries(record.log || []),
       nextLogNumber: record.nextLogNumber,
       playerControllers: normalizePlayerControllers(record.playerControllers),
-      deckMode: normalizeDeckMode(record.deckMode)
+      deckMode: normalizeDeckMode(record.deckMode),
+      appVersion: typeof record.appVersion === "string" && record.appVersion.length ? record.appVersion : APP_VERSION,
+      humanAliases: getEffectiveHumanAliases(record.humanAliases, record.playerControllers),
+      matchKind: Object.values(MATCH_KINDS).includes(record.matchKind)
+        ? record.matchKind
+        : getMatchKind(record.playerControllers),
+      remoteEligible: Boolean(record.remoteEligible ?? hasHumanPlayer(record.playerControllers)),
+      remoteSyncStatus: Object.values(REMOTE_MATCH_SYNC_STATUSES).includes(record.remoteSyncStatus)
+        ? record.remoteSyncStatus
+        : null,
+      remoteRecordId: typeof record.remoteRecordId === "string" && record.remoteRecordId.length
+        ? record.remoteRecordId
+        : null,
+      remoteSyncError: typeof record.remoteSyncError === "string" && record.remoteSyncError.length
+        ? record.remoteSyncError
+        : null,
+      remoteSyncAttemptedAt: typeof record.remoteSyncAttemptedAt === "string" && record.remoteSyncAttemptedAt.length
+        ? record.remoteSyncAttemptedAt
+        : null
     };
   }
 
@@ -482,7 +642,15 @@
       log: stripLogSnapshots(normalizedRecord.log),
       nextLogNumber: normalizedRecord.nextLogNumber,
       playerControllers: normalizePlayerControllers(normalizedRecord.playerControllers),
-      deckMode: normalizeDeckMode(normalizedRecord.deckMode)
+      deckMode: normalizeDeckMode(normalizedRecord.deckMode),
+      appVersion: normalizedRecord.appVersion,
+      humanAliases: cloneData(normalizedRecord.humanAliases),
+      matchKind: normalizedRecord.matchKind,
+      remoteEligible: normalizedRecord.remoteEligible,
+      remoteSyncStatus: normalizedRecord.remoteSyncStatus,
+      remoteRecordId: normalizedRecord.remoteRecordId,
+      remoteSyncError: normalizedRecord.remoteSyncError,
+      remoteSyncAttemptedAt: normalizedRecord.remoteSyncAttemptedAt
     };
   }
 
@@ -532,7 +700,25 @@
       log: normalizedLog,
       nextLogNumber: Number.isInteger(record.nextLogNumber) ? record.nextLogNumber : (Array.isArray(record.log) ? record.log.length + 1 : 1),
       playerControllers: normalizePlayerControllers(normalizedControllers),
-      deckMode: normalizeDeckMode(normalizedDeckMode)
+      deckMode: normalizeDeckMode(normalizedDeckMode),
+      appVersion: typeof record.appVersion === "string" && record.appVersion.length ? record.appVersion : APP_VERSION,
+      humanAliases: getEffectiveHumanAliases(record.humanAliases, normalizedControllers),
+      matchKind: Object.values(MATCH_KINDS).includes(record.matchKind)
+        ? record.matchKind
+        : getMatchKind(normalizedControllers),
+      remoteEligible: Boolean(record.remoteEligible ?? hasHumanPlayer(normalizedControllers)),
+      remoteSyncStatus: Object.values(REMOTE_MATCH_SYNC_STATUSES).includes(record.remoteSyncStatus)
+        ? record.remoteSyncStatus
+        : null,
+      remoteRecordId: typeof record.remoteRecordId === "string" && record.remoteRecordId.length
+        ? record.remoteRecordId
+        : null,
+      remoteSyncError: typeof record.remoteSyncError === "string" && record.remoteSyncError.length
+        ? record.remoteSyncError
+        : null,
+      remoteSyncAttemptedAt: typeof record.remoteSyncAttemptedAt === "string" && record.remoteSyncAttemptedAt.length
+        ? record.remoteSyncAttemptedAt
+        : null
     };
   }
 
@@ -628,7 +814,15 @@
       log: cloneLogEntries(state.log),
       nextLogNumber: state.nextLogNumber,
       playerControllers: normalizePlayerControllers(state.playerControllers),
-      deckMode: normalizeDeckMode(state.deckMode)
+      deckMode: normalizeDeckMode(state.deckMode),
+      appVersion: APP_VERSION,
+      humanAliases: getEffectiveHumanAliases(state.humanAliases, state.playerControllers),
+      matchKind: getMatchKind(state.playerControllers),
+      remoteEligible: hasHumanPlayer(state.playerControllers),
+      remoteSyncStatus: null,
+      remoteRecordId: null,
+      remoteSyncError: null,
+      remoteSyncAttemptedAt: null
     };
   }
 
@@ -670,6 +864,10 @@
     }
 
     const savedRecord = createSavedMatchRecord(state, status);
+    const remoteConfig = getRemoteHistoryConfig(options);
+    if (savedRecord.remoteEligible && remoteConfig.enabled) {
+      savedRecord.remoteSyncStatus = REMOTE_MATCH_SYNC_STATUSES.PENDING;
+    }
     state.matchHistory = [
       savedRecord,
       ...((state.matchHistory || []).filter((record) => record.id !== savedRecord.id))
@@ -685,7 +883,306 @@
       notifyHistoryPersistenceFailure(status, options);
     }
 
+    if (savedRecord.remoteEligible && remoteConfig.enabled && state === gameState) {
+      scheduleRemoteMatchSync(savedRecord.id, options);
+    }
+
     return result;
+  }
+
+  function isPromiseLike(value) {
+    return Boolean(value && typeof value.then === "function");
+  }
+
+  function handleMaybePromise(value, onSuccess, onError) {
+    if (isPromiseLike(value)) {
+      return value.then(onSuccess, onError);
+    }
+
+    try {
+      return onSuccess(value);
+    } catch (error) {
+      if (typeof onError === "function") {
+        return onError(error);
+      }
+
+      throw error;
+    }
+  }
+
+  function getSavedMatchById(state, recordId) {
+    if (!state || !Array.isArray(state.matchHistory)) {
+      return null;
+    }
+
+    return state.matchHistory.find((record) => record.id === recordId) || null;
+  }
+
+  function setSavedMatchRemoteSyncState(state, recordId, patch, options = {}) {
+    const record = getSavedMatchById(state, recordId);
+    if (!record) {
+      return null;
+    }
+
+    Object.assign(record, patch);
+    saveMatchHistory(state.matchHistory, options);
+    return record;
+  }
+
+  function buildRemoteMatchPayload(record) {
+    const normalizedRecord = normalizeSavedMatchRecord(record);
+    if (!normalizedRecord || !normalizedRecord.remoteEligible) {
+      return null;
+    }
+
+    const persistedRecord = createPersistedMatchRecord(normalizedRecord);
+    if (!persistedRecord) {
+      return null;
+    }
+
+    const winnerName = getSavedMatchWinnerName(normalizedRecord);
+    return {
+      match_saved_at: normalizedRecord.savedAt,
+      status: normalizedRecord.status,
+      match_kind: normalizedRecord.matchKind,
+      winner_player_id: normalizedRecord.winnerPlayerId,
+      winner_name: winnerName,
+      summary: normalizedRecord.summary,
+      deck_mode: normalizedRecord.deckMode,
+      player_controllers: normalizePlayerControllers(normalizedRecord.playerControllers),
+      human_aliases: cloneData(normalizedRecord.humanAliases),
+      app_version: normalizedRecord.appVersion,
+      action_count: normalizedRecord.log.length,
+      record: {
+        ...persistedRecord,
+        appVersion: normalizedRecord.appVersion,
+        humanAliases: cloneData(normalizedRecord.humanAliases),
+        matchKind: normalizedRecord.matchKind
+      }
+    };
+  }
+
+  function normalizeSupabaseRemoteRow(row) {
+    if (!row || typeof row !== "object" || !row.record) {
+      return null;
+    }
+
+    const normalizedRecord = normalizeSavedMatchRecord({
+      ...cloneData(row.record),
+      id: typeof row.record.id === "string" && row.record.id.length ? row.record.id : String(row.id || createUniqueMatchId()),
+      savedAt: typeof row.match_saved_at === "string" && row.match_saved_at.length
+        ? row.match_saved_at
+        : (typeof row.record.savedAt === "string" ? row.record.savedAt : new Date().toISOString()),
+      status: row.status === "finished" ? "finished" : "abandoned",
+      winnerPlayerId: Number.isInteger(row.winner_player_id) ? row.winner_player_id : row.record.winnerPlayerId,
+      summary: typeof row.summary === "string" ? row.summary : row.record.summary,
+      playerControllers: row.player_controllers || row.record.playerControllers,
+      deckMode: row.deck_mode || row.record.deckMode,
+      appVersion: typeof row.app_version === "string" && row.app_version.length
+        ? row.app_version
+        : row.record.appVersion,
+      humanAliases: row.human_aliases || row.record.humanAliases,
+      matchKind: typeof row.match_kind === "string" && row.match_kind.length
+        ? row.match_kind
+        : row.record.matchKind,
+      remoteEligible: true,
+      remoteSyncStatus: REMOTE_MATCH_SYNC_STATUSES.SYNCED,
+      remoteRecordId: typeof row.id === "string" ? row.id : String(row.id || ""),
+      remoteSyncError: null,
+      remoteSyncAttemptedAt: typeof row.created_at === "string" ? row.created_at : null
+    });
+
+    if (!normalizedRecord) {
+      return null;
+    }
+
+    normalizedRecord.remoteCreatedAt = typeof row.created_at === "string" ? row.created_at : normalizedRecord.savedAt;
+    return normalizedRecord;
+  }
+
+  function fetchRemoteMatchHistory(options = {}) {
+    const config = getRemoteHistoryConfig(options);
+    if (!config.enabled) {
+      return [];
+    }
+
+    const request = typeof options.fetch === "function"
+      ? options.fetch
+      : (typeof fetch === "function" ? fetch.bind(typeof window !== "undefined" ? window : null) : null);
+    if (!request) {
+      throw new Error("fetch indisponivel para carregar o historico remoto.");
+    }
+
+    const selectFields = [
+      "id",
+      "created_at",
+      "match_saved_at",
+      "status",
+      "match_kind",
+      "winner_player_id",
+      "winner_name",
+      "summary",
+      "deck_mode",
+      "player_controllers",
+      "human_aliases",
+      "app_version",
+      "action_count",
+      "record"
+    ].join(",");
+    const url = `${config.url}/rest/v1/${REMOTE_MATCH_HISTORY_TABLE}?select=${encodeURIComponent(selectFields)}&order=match_saved_at.desc&limit=${REMOTE_MATCH_HISTORY_FETCH_LIMIT}`;
+
+    return handleMaybePromise(
+      request(url, {
+        method: "GET",
+        headers: {
+          apikey: config.anonKey,
+          Authorization: `Bearer ${config.anonKey}`,
+          Accept: "application/json"
+        }
+      }),
+      (response) => {
+        if (!response || response.ok === false) {
+          const statusCode = response?.status ? ` ${response.status}` : "";
+          throw new Error(`Falha ao carregar o historico remoto.${statusCode}`);
+        }
+
+        const payload = typeof response.json === "function" ? response.json() : [];
+        return handleMaybePromise(payload, (rows) => (
+          Array.isArray(rows)
+            ? rows.map((row) => normalizeSupabaseRemoteRow(row)).filter(Boolean)
+            : []
+        ));
+      }
+    );
+  }
+
+  function refreshRemoteMatchHistory(state, options = {}) {
+    const config = getRemoteHistoryConfig(options);
+    if (!config.enabled) {
+      state.remoteMatchHistory = [];
+      state.remoteMatchHistoryStatus = REMOTE_MATCH_HISTORY_LOAD_STATUSES.FAILED;
+      state.remoteMatchHistoryError = "Historico remoto desativado ou nao configurado.";
+      state.selectedRemoteHistoryMatchId = null;
+      return false;
+    }
+
+    state.remoteMatchHistoryStatus = REMOTE_MATCH_HISTORY_LOAD_STATUSES.LOADING;
+    state.remoteMatchHistoryError = null;
+    const finishSuccess = (records) => {
+      state.remoteMatchHistory = Array.isArray(records) ? records.map((record) => cloneSavedMatchRecord(record)) : [];
+      state.remoteMatchHistoryStatus = REMOTE_MATCH_HISTORY_LOAD_STATUSES.READY;
+      state.remoteMatchHistoryError = null;
+      const selectedStillExists = state.remoteMatchHistory.some((record) => record.id === state.selectedRemoteHistoryMatchId);
+      state.selectedRemoteHistoryMatchId = selectedStillExists
+        ? state.selectedRemoteHistoryMatchId
+        : (state.remoteMatchHistory[0]?.id || null);
+      return state.remoteMatchHistory;
+    };
+    const finishFailure = (error) => {
+      state.remoteMatchHistory = [];
+      state.remoteMatchHistoryStatus = REMOTE_MATCH_HISTORY_LOAD_STATUSES.FAILED;
+      state.remoteMatchHistoryError = error?.message || "Nao foi possivel carregar o historico remoto.";
+      state.selectedRemoteHistoryMatchId = null;
+      return [];
+    };
+
+    return handleMaybePromise(fetchRemoteMatchHistory(options), finishSuccess, finishFailure);
+  }
+
+  function syncSavedMatchRecordToRemote(state, recordId, options = {}) {
+    const record = getSavedMatchById(state, recordId);
+    const config = getRemoteHistoryConfig(options);
+    const request = typeof options.fetch === "function"
+      ? options.fetch
+      : (typeof fetch === "function" ? fetch.bind(typeof window !== "undefined" ? window : null) : null);
+
+    if (!record || !record.remoteEligible || !config.enabled || !request) {
+      return false;
+    }
+
+    const payload = buildRemoteMatchPayload(record);
+    if (!payload) {
+      return false;
+    }
+
+    setSavedMatchRemoteSyncState(state, recordId, {
+      remoteSyncStatus: REMOTE_MATCH_SYNC_STATUSES.PENDING,
+      remoteSyncError: null,
+      remoteSyncAttemptedAt: new Date().toISOString()
+    }, options);
+
+    const finishSuccess = (rowPayload) => {
+      const row = Array.isArray(rowPayload) ? rowPayload[0] : rowPayload;
+      setSavedMatchRemoteSyncState(state, recordId, {
+        remoteSyncStatus: REMOTE_MATCH_SYNC_STATUSES.SYNCED,
+        remoteRecordId: typeof row?.id === "string" && row.id.length ? row.id : (record.remoteRecordId || null),
+        remoteSyncError: null,
+        remoteSyncAttemptedAt: new Date().toISOString()
+      }, options);
+      if (options.showFeedback) {
+        state.remoteHistorySyncFeedback = "Partida enviada para o historico remoto.";
+        state.remoteHistorySyncFeedbackStatus = "success";
+      }
+      return true;
+    };
+    const finishFailure = (error) => {
+      setSavedMatchRemoteSyncState(state, recordId, {
+        remoteSyncStatus: REMOTE_MATCH_SYNC_STATUSES.FAILED,
+        remoteSyncError: error?.message || "Falha ao enviar a partida para o historico remoto.",
+        remoteSyncAttemptedAt: new Date().toISOString()
+      }, options);
+      if (options.showFeedback) {
+        state.remoteHistorySyncFeedback = error?.message || "Falha ao enviar a partida para o historico remoto.";
+        state.remoteHistorySyncFeedbackStatus = "error";
+      }
+      return false;
+    };
+
+    return handleMaybePromise(
+      request(`${config.url}/rest/v1/${REMOTE_MATCH_HISTORY_TABLE}`, {
+        method: "POST",
+        headers: {
+          apikey: config.anonKey,
+          Authorization: `Bearer ${config.anonKey}`,
+          "Content-Type": "application/json",
+          Prefer: "return=representation"
+        },
+        body: JSON.stringify(payload)
+      }),
+      (response) => {
+        if (!response || response.ok === false) {
+          const statusCode = response?.status ? ` ${response.status}` : "";
+          throw new Error(`Falha ao salvar a partida no historico remoto.${statusCode}`);
+        }
+
+        const responsePayload = typeof response.json === "function" ? response.json() : null;
+        return handleMaybePromise(responsePayload, finishSuccess, finishFailure);
+      },
+      finishFailure
+    );
+  }
+
+  function scheduleRemoteMatchSync(recordId, options = {}) {
+    Promise.resolve().then(() => {
+      const currentState = typeof options.getState === "function" ? options.getState() : gameState;
+      const renderFn = typeof options.renderFn === "function"
+        ? options.renderFn
+        : (typeof document !== "undefined" ? render : null);
+      const syncResult = syncSavedMatchRecordToRemote(currentState, recordId, options);
+
+      if (isPromiseLike(syncResult)) {
+        syncResult.finally(() => {
+          if (typeof renderFn === "function") {
+            renderFn(currentState);
+          }
+        });
+        return;
+      }
+
+      if (typeof renderFn === "function") {
+        renderFn(currentState);
+      }
+    });
   }
 
   function getSavedMatchPlayers(record) {
@@ -706,6 +1203,14 @@
     }
 
     return state.matchHistory.find((record) => record.id === state.selectedHistoryMatchId) || null;
+  }
+
+  function getSelectedRemoteHistoryMatch(state) {
+    if (!state || state.selectedRemoteHistoryMatchId == null || !Array.isArray(state.remoteMatchHistory)) {
+      return null;
+    }
+
+    return state.remoteMatchHistory.find((record) => record.id === state.selectedRemoteHistoryMatchId) || null;
   }
 
   function getHistoryRestoreTarget(record, selectedEntryId = null) {
@@ -759,18 +1264,24 @@
     const restoredState = restoreStateFromSnapshot(restoreTarget.snapshot, restoreTarget.log);
     restoredState.currentMatchId = createUniqueMatchId();
     restoredState.matchHistory = (previousState?.matchHistory || []).map((item) => cloneSavedMatchRecord(item));
+    restoredState.remoteMatchHistory = (previousState?.remoteMatchHistory || []).map((item) => cloneSavedMatchRecord(item));
     restoredState.hasCurrentMatchBeenSavedToHistory = false;
     restoredState.historySourceRecordId = record.id;
     restoredState.hasDivergedFromHistorySource = false;
+    restoredState.humanAliases = normalizeHumanAliases(record.humanAliases);
     restoredState.selectedHistoryMatchId = null;
     restoredState.selectedHistoryLogEntryId = null;
+    restoredState.selectedRemoteHistoryMatchId = null;
     restoredState.selectedValidationIssueIndex = null;
     restoredState.logValidationCopyFeedback = null;
     restoredState.logValidationCopyFeedbackStatus = null;
+    restoredState.remoteHistorySyncFeedback = null;
+    restoredState.remoteHistorySyncFeedbackStatus = null;
     restoredState.isLibraryOpen = false;
     restoredState.isRulesOpen = false;
     restoredState.isLogOpen = false;
     restoredState.isHistoryOpen = false;
+    restoredState.historyViewMode = HISTORY_VIEW_MODES.LOCAL;
     restoredState.selectedLogEntryId = null;
     return restoredState;
   }
@@ -783,6 +1294,7 @@
       playerDiscardPiles: [[], []],
       currentPlayerIndex: 0,
       playerControllers: getSessionPlayerControllers(),
+      humanAliases: getSessionHumanAliases(),
       deckMode: getSessionDeckMode(),
       isMatchStarted: false,
       matchPresentationMode: MATCH_PRESENTATION_MODES.VISUAL,
@@ -813,11 +1325,18 @@
       isRulesOpen: false,
       isLogOpen: false,
       isHistoryOpen: false,
+      historyViewMode: HISTORY_VIEW_MODES.LOCAL,
       selectedAttackerId: null,
       selectedEffectCard: null,
       selectedLogEntryId: null,
       selectedHistoryMatchId: null,
       selectedHistoryLogEntryId: null,
+      remoteMatchHistory: [],
+      selectedRemoteHistoryMatchId: null,
+      remoteMatchHistoryStatus: REMOTE_MATCH_HISTORY_LOAD_STATUSES.IDLE,
+      remoteMatchHistoryError: null,
+      remoteHistorySyncFeedback: null,
+      remoteHistorySyncFeedbackStatus: null,
       isWinnerModalOpen: false,
       winner: null,
       turnNumber: 1,
@@ -847,13 +1366,23 @@
     const rng = typeof options.rng === "function" ? options.rng : Math.random;
     const preservedControllers = setSessionPlayerControllers(previousState?.playerControllers);
     nextState.playerControllers = preservedControllers;
+    nextState.humanAliases = setSessionHumanAliases(previousState?.humanAliases);
     nextState.deckMode = setSessionDeckMode(previousState?.deckMode);
     nextState.headlessBatchRequestedCount = normalizeHeadlessBatchCount(previousState?.headlessBatchRequestedCount);
     nextState.isLibraryOpen = Boolean(previousState?.isLibraryOpen);
     nextState.isRulesOpen = Boolean(previousState?.isRulesOpen);
     nextState.isLogOpen = Boolean(previousState?.isLogOpen);
     nextState.isHistoryOpen = Boolean(previousState?.isHistoryOpen);
+    nextState.historyViewMode = previousState?.historyViewMode === HISTORY_VIEW_MODES.REMOTE
+      ? HISTORY_VIEW_MODES.REMOTE
+      : HISTORY_VIEW_MODES.LOCAL;
     nextState.matchHistory = (previousState?.matchHistory || []).map((record) => cloneSavedMatchRecord(record));
+    nextState.remoteMatchHistory = (previousState?.remoteMatchHistory || []).map((record) => cloneSavedMatchRecord(record));
+    nextState.selectedRemoteHistoryMatchId = previousState?.selectedRemoteHistoryMatchId ?? null;
+    nextState.remoteMatchHistoryStatus = previousState?.remoteMatchHistoryStatus || REMOTE_MATCH_HISTORY_LOAD_STATUSES.IDLE;
+    nextState.remoteMatchHistoryError = previousState?.remoteMatchHistoryError || null;
+    nextState.remoteHistorySyncFeedback = previousState?.remoteHistorySyncFeedback || null;
+    nextState.remoteHistorySyncFeedbackStatus = previousState?.remoteHistorySyncFeedbackStatus || null;
     nextState.currentMatchId = createUniqueMatchId();
     nextState.isMatchStarted = true;
     nextState.matchPresentationMode = MATCH_PRESENTATION_MODES.VISUAL;
@@ -896,13 +1425,23 @@
     }
 
     nextState.playerControllers = setSessionPlayerControllers(previousState.playerControllers);
+    nextState.humanAliases = setSessionHumanAliases(previousState.humanAliases);
     nextState.deckMode = setSessionDeckMode(previousState.deckMode);
     nextState.headlessBatchRequestedCount = normalizeHeadlessBatchCount(previousState.headlessBatchRequestedCount);
     nextState.isLibraryOpen = Boolean(previousState.isLibraryOpen);
     nextState.isRulesOpen = Boolean(previousState.isRulesOpen);
     nextState.isLogOpen = Boolean(previousState.isLogOpen);
     nextState.isHistoryOpen = Boolean(previousState.isHistoryOpen);
+    nextState.historyViewMode = previousState.historyViewMode === HISTORY_VIEW_MODES.REMOTE
+      ? HISTORY_VIEW_MODES.REMOTE
+      : HISTORY_VIEW_MODES.LOCAL;
     nextState.matchHistory = (previousState.matchHistory || []).map((record) => cloneSavedMatchRecord(record));
+    nextState.remoteMatchHistory = (previousState.remoteMatchHistory || []).map((record) => cloneSavedMatchRecord(record));
+    nextState.selectedRemoteHistoryMatchId = previousState.selectedRemoteHistoryMatchId ?? null;
+    nextState.remoteMatchHistoryStatus = previousState.remoteMatchHistoryStatus || REMOTE_MATCH_HISTORY_LOAD_STATUSES.IDLE;
+    nextState.remoteMatchHistoryError = previousState.remoteMatchHistoryError || null;
+    nextState.remoteHistorySyncFeedback = previousState.remoteHistorySyncFeedback || null;
+    nextState.remoteHistorySyncFeedbackStatus = previousState.remoteHistorySyncFeedbackStatus || null;
 
     if (previousState.isMatchStarted && !isHeadlessAiVsAiMode(previousState)) {
       archiveCurrentMatchIfNeeded(previousState, previousState.winner ? "finished" : "abandoned", options);
@@ -1127,6 +1666,7 @@
       playerDiscardPiles: cloneData(snapshot.playerDiscardPiles || [[], []]),
       currentPlayerIndex: snapshot.currentPlayerIndex,
       playerControllers: normalizePlayerControllers(snapshot.playerControllers),
+      humanAliases: normalizeHumanAliases(stateOptions.humanAliases),
       deckMode: normalizeDeckMode(snapshot.deckMode),
       isMatchStarted: Boolean(snapshot.isMatchStarted),
       matchPresentationMode: MATCH_PRESENTATION_MODES.VISUAL,
@@ -1157,11 +1697,20 @@
       isRulesOpen: snapshot.isRulesOpen,
       isLogOpen: snapshot.isLogOpen,
       isHistoryOpen: Boolean(stateOptions.isHistoryOpen),
+      historyViewMode: stateOptions.historyViewMode === HISTORY_VIEW_MODES.REMOTE
+        ? HISTORY_VIEW_MODES.REMOTE
+        : HISTORY_VIEW_MODES.LOCAL,
       selectedAttackerId: snapshot.selectedAttackerId,
       selectedEffectCard: cloneData(snapshot.selectedEffectCard),
       selectedLogEntryId: null,
       selectedHistoryMatchId: stateOptions.selectedHistoryMatchId ?? null,
       selectedHistoryLogEntryId: stateOptions.selectedHistoryLogEntryId ?? null,
+      remoteMatchHistory: (stateOptions.remoteMatchHistory || []).map((record) => cloneSavedMatchRecord(record)),
+      selectedRemoteHistoryMatchId: stateOptions.selectedRemoteHistoryMatchId ?? null,
+      remoteMatchHistoryStatus: stateOptions.remoteMatchHistoryStatus || REMOTE_MATCH_HISTORY_LOAD_STATUSES.IDLE,
+      remoteMatchHistoryError: stateOptions.remoteMatchHistoryError || null,
+      remoteHistorySyncFeedback: stateOptions.remoteHistorySyncFeedback || null,
+      remoteHistorySyncFeedbackStatus: stateOptions.remoteHistorySyncFeedbackStatus || null,
       isWinnerModalOpen: Boolean(snapshot.winnerPlayerId),
       winner: null,
       turnNumber: snapshot.turnNumber,
@@ -2154,7 +2703,15 @@
         ? true
         : state.hasDivergedFromHistorySource,
       hasCurrentMatchBeenSavedToHistory: state.hasCurrentMatchBeenSavedToHistory,
+      humanAliases: state.humanAliases,
       matchHistory: state.matchHistory,
+      remoteMatchHistory: state.remoteMatchHistory,
+      selectedRemoteHistoryMatchId: state.selectedRemoteHistoryMatchId,
+      remoteMatchHistoryStatus: state.remoteMatchHistoryStatus,
+      remoteMatchHistoryError: state.remoteMatchHistoryError,
+      remoteHistorySyncFeedback: state.remoteHistorySyncFeedback,
+      remoteHistorySyncFeedbackStatus: state.remoteHistorySyncFeedbackStatus,
+      historyViewMode: state.historyViewMode,
       isHistoryOpen: state.isHistoryOpen
     });
   }
@@ -5251,10 +5808,52 @@
     return parsedDate.toLocaleString("pt-BR");
   }
 
+  function formatHumanAliasSummary(record) {
+    const aliases = Array.isArray(record?.humanAliases)
+      ? record.humanAliases.filter((alias) => typeof alias === "string" && alias.length)
+      : [];
+
+    return aliases.length ? aliases.join(" · ") : "Sem apelidos humanos";
+  }
+
+  function getHistoryRecordMetaLine(record) {
+    const winnerName = getSavedMatchWinnerName(record);
+    return [
+      winnerName ? `${winnerName} venceu` : null,
+      record.summary,
+      getMatchKindLabel(record.matchKind),
+      formatHumanAliasSummary(record),
+      `${getControllerDisplayLabel(record.playerControllers[0])} x ${getControllerDisplayLabel(record.playerControllers[1])}`,
+      `Baralho ${getDeckModeLabel(record.deckMode)}`,
+      `${record.log.length} acao(oes)`,
+      record.appVersion ? `Versao ${record.appVersion}` : null
+    ].filter(Boolean).join(" · ");
+  }
+
+  function getLocalHistorySyncLine(record, options = {}) {
+    const config = getRemoteHistoryConfig(options);
+    if (!record?.remoteEligible || !config.enabled) {
+      return "";
+    }
+
+    const baseLabel = `Sync remoto: ${getRemoteSyncStatusLabel(record.remoteSyncStatus)}`;
+    if (record.remoteSyncStatus === REMOTE_MATCH_SYNC_STATUSES.FAILED && record.remoteSyncError) {
+      return `${baseLabel}. ${record.remoteSyncError}`;
+    }
+
+    return baseLabel;
+  }
+
   function selectHistoryMatch(state, matchId) {
     const selectedRecord = (state.matchHistory || []).find((record) => record.id === matchId) || null;
     state.selectedHistoryMatchId = selectedRecord?.id ?? null;
     state.selectedHistoryLogEntryId = selectedRecord ? getDefaultHistoryLogEntryId(selectedRecord) : null;
+    return selectedRecord;
+  }
+
+  function selectRemoteHistoryMatch(state, matchId) {
+    const selectedRecord = (state.remoteMatchHistory || []).find((record) => record.id === matchId) || null;
+    state.selectedRemoteHistoryMatchId = selectedRecord?.id ?? null;
     return selectedRecord;
   }
 
@@ -5336,6 +5935,203 @@
         state.selectedHistoryLogEntryId = entry.id;
         render(state);
       });
+      historyLog.appendChild(item);
+    });
+  }
+
+  function renderMatchHistoryLegacy(state) {
+    const historyCount = document.getElementById("history-match-count");
+    const historyList = document.getElementById("match-history-list");
+    const historyDetails = document.getElementById("history-match-details");
+    const historyTitle = document.getElementById("history-match-title");
+    const historyMeta = document.getElementById("history-match-meta");
+    const historyLog = document.getElementById("history-log");
+    const restoreButton = document.getElementById("restore-history-match-button");
+    const historyLocalTabButton = document.getElementById("history-local-tab-button");
+    const historyRemoteTabButton = document.getElementById("history-remote-tab-button");
+    const refreshRemoteHistoryButton = document.getElementById("refresh-remote-history-button");
+    const retryRemoteHistorySyncButton = document.getElementById("retry-remote-history-sync-button");
+    const remoteHistoryFeedback = document.getElementById("remote-history-sync-feedback");
+    const remoteConfig = getRemoteHistoryConfig();
+
+    if (!historyCount || !historyList || !historyDetails || !historyTitle || !historyMeta || !historyLog || !restoreButton || !historyLocalTabButton || !historyRemoteTabButton || !refreshRemoteHistoryButton || !retryRemoteHistorySyncButton || !remoteHistoryFeedback) {
+      return;
+    }
+
+    const viewingRemote = state.historyViewMode === HISTORY_VIEW_MODES.REMOTE;
+    historyLocalTabButton.classList.toggle("is-selected", !viewingRemote);
+    historyRemoteTabButton.classList.toggle("is-selected", viewingRemote);
+    historyLocalTabButton.setAttribute("aria-pressed", String(!viewingRemote));
+    historyRemoteTabButton.setAttribute("aria-pressed", String(viewingRemote));
+    refreshRemoteHistoryButton.hidden = !viewingRemote;
+    refreshRemoteHistoryButton.disabled = !viewingRemote || state.remoteMatchHistoryStatus === REMOTE_MATCH_HISTORY_LOAD_STATUSES.LOADING || !remoteConfig.enabled;
+    remoteHistoryFeedback.hidden = !state.remoteHistorySyncFeedback;
+    remoteHistoryFeedback.textContent = state.remoteHistorySyncFeedback || "";
+    remoteHistoryFeedback.className = state.remoteHistorySyncFeedbackStatus === "error"
+      ? "remote-history-sync-feedback is-error"
+      : "remote-history-sync-feedback";
+    historyList.innerHTML = "";
+    historyLog.innerHTML = "";
+
+    if (!viewingRemote) {
+      historyCount.textContent = `${state.matchHistory.length} partida(s) locais`;
+
+      if (!state.matchHistory.length) {
+        const empty = document.createElement("div");
+        empty.className = "empty-state";
+        empty.textContent = "Nenhuma partida anterior foi salva ainda.";
+        historyList.appendChild(empty);
+        historyDetails.hidden = true;
+        restoreButton.hidden = false;
+        restoreButton.disabled = true;
+        retryRemoteHistorySyncButton.hidden = true;
+        return;
+      }
+
+      state.matchHistory.forEach((record) => {
+        const item = document.createElement("button");
+        item.type = "button";
+        item.className = record.id === state.selectedHistoryMatchId
+          ? "match-history-entry is-selected"
+          : "match-history-entry";
+        item.innerHTML = `
+          <span class="match-history-entry-title">${getHistoryStatusLabel(record.status)} · ${formatSavedMatchDate(record.savedAt)}</span>
+          <span class="match-history-entry-meta">${getHistoryRecordMetaLine(record)}</span>
+        `;
+        item.addEventListener("click", () => {
+          selectHistoryMatch(state, record.id);
+          render(state);
+        });
+        historyList.appendChild(item);
+      });
+
+      const selectedRecord = getSelectedHistoryMatch(state);
+      if (!selectedRecord) {
+        historyDetails.hidden = true;
+        restoreButton.hidden = false;
+        restoreButton.disabled = true;
+        retryRemoteHistorySyncButton.hidden = true;
+        return;
+      }
+
+      historyDetails.hidden = false;
+      historyTitle.textContent = `${getHistoryStatusLabel(selectedRecord.status)} · ${formatSavedMatchDate(selectedRecord.savedAt)}`;
+      historyMeta.textContent = `${getHistoryRecordMetaLine(selectedRecord)}${getLocalHistorySyncLine(selectedRecord) ? `. ${getLocalHistorySyncLine(selectedRecord)}` : ""}`;
+      restoreButton.hidden = false;
+      restoreButton.disabled = !getHistoryRestoreTarget(selectedRecord, state.selectedHistoryLogEntryId);
+      retryRemoteHistorySyncButton.hidden = !selectedRecord.remoteEligible || !remoteConfig.enabled;
+      retryRemoteHistorySyncButton.disabled = selectedRecord.remoteSyncStatus === REMOTE_MATCH_SYNC_STATUSES.PENDING;
+
+      if (!selectedRecord.log.length) {
+        const empty = document.createElement("div");
+        empty.className = "empty-state";
+        empty.textContent = "Esta partida nao possui log salvo.";
+        historyLog.appendChild(empty);
+        return;
+      }
+
+      getDisplayLogEntries(selectedRecord.log).forEach((entry) => {
+        const item = document.createElement("button");
+        item.type = "button";
+        item.className = `log-entry${state.selectedHistoryLogEntryId === entry.id ? " is-selected" : ""}`;
+        item.innerHTML = `
+          <span class="log-entry-number">${entry.numero}</span>
+          <span class="log-entry-text">${entry.texto}</span>
+        `;
+        item.addEventListener("click", () => {
+          state.selectedHistoryLogEntryId = entry.id;
+          render(state);
+        });
+        historyLog.appendChild(item);
+      });
+      return;
+    }
+
+    restoreButton.hidden = true;
+    retryRemoteHistorySyncButton.hidden = true;
+
+    if (!remoteConfig.enabled) {
+      historyCount.textContent = "Historico remoto desativado";
+      const empty = document.createElement("div");
+      empty.className = "empty-state";
+      empty.textContent = "Configure remote-history-config.js com SUPABASE_URL e SUPABASE_ANON_KEY para habilitar o historico remoto.";
+      historyList.appendChild(empty);
+      historyDetails.hidden = true;
+      return;
+    }
+
+    if (state.remoteMatchHistoryStatus === REMOTE_MATCH_HISTORY_LOAD_STATUSES.LOADING) {
+      historyCount.textContent = "Carregando remoto...";
+      const empty = document.createElement("div");
+      empty.className = "empty-state";
+      empty.textContent = "Carregando partidas do historico remoto...";
+      historyList.appendChild(empty);
+      historyDetails.hidden = true;
+      return;
+    }
+
+    if (state.remoteMatchHistoryStatus === REMOTE_MATCH_HISTORY_LOAD_STATUSES.FAILED && state.remoteMatchHistoryError) {
+      historyCount.textContent = "Historico remoto";
+      const empty = document.createElement("div");
+      empty.className = "empty-state";
+      empty.textContent = state.remoteMatchHistoryError;
+      historyList.appendChild(empty);
+      historyDetails.hidden = true;
+      return;
+    }
+
+    historyCount.textContent = `${state.remoteMatchHistory.length} partida(s) remotas`;
+    if (!state.remoteMatchHistory.length) {
+      const empty = document.createElement("div");
+      empty.className = "empty-state";
+      empty.textContent = "Nenhuma partida humana foi enviada para o historico remoto ainda.";
+      historyList.appendChild(empty);
+      historyDetails.hidden = true;
+      return;
+    }
+
+    state.remoteMatchHistory.forEach((record) => {
+      const item = document.createElement("button");
+      item.type = "button";
+      item.className = record.id === state.selectedRemoteHistoryMatchId
+        ? "match-history-entry is-selected"
+        : "match-history-entry";
+      item.innerHTML = `
+        <span class="match-history-entry-title">${getHistoryStatusLabel(record.status)} · ${formatSavedMatchDate(record.savedAt)}</span>
+        <span class="match-history-entry-meta">${getHistoryRecordMetaLine(record)}</span>
+      `;
+      item.addEventListener("click", () => {
+        selectRemoteHistoryMatch(state, record.id);
+        render(state);
+      });
+      historyList.appendChild(item);
+    });
+
+    const selectedRemoteRecord = getSelectedRemoteHistoryMatch(state);
+    if (!selectedRemoteRecord) {
+      historyDetails.hidden = true;
+      return;
+    }
+
+    historyDetails.hidden = false;
+    historyTitle.textContent = `${getHistoryStatusLabel(selectedRemoteRecord.status)} · ${formatSavedMatchDate(selectedRemoteRecord.savedAt)}`;
+    historyMeta.textContent = getHistoryRecordMetaLine(selectedRemoteRecord);
+
+    if (!selectedRemoteRecord.log.length) {
+      const empty = document.createElement("div");
+      empty.className = "empty-state";
+      empty.textContent = "Esta partida remota nao possui log salvo.";
+      historyLog.appendChild(empty);
+      return;
+    }
+
+    getDisplayLogEntries(selectedRemoteRecord.log).forEach((entry) => {
+      const item = document.createElement("div");
+      item.className = "log-entry is-read-only";
+      item.innerHTML = `
+        <span class="log-entry-number">${entry.numero}</span>
+        <span class="log-entry-text">${entry.texto}</span>
+      `;
       historyLog.appendChild(item);
     });
   }
@@ -5445,14 +6241,16 @@
       state
       && (
         (state.isLogOpen && getSelectedLogEntry(state))
-        || (state.isHistoryOpen && getSelectedHistoryLogEntry(state))
+        || (state.isHistoryOpen && state.historyViewMode === HISTORY_VIEW_MODES.LOCAL && getSelectedHistoryLogEntry(state))
       )
     );
   }
 
   function getRenderedGameState(state) {
     const currentMatchEntry = state?.isLogOpen ? getSelectedLogEntry(state) : null;
-    const historyMatchEntry = state?.isHistoryOpen ? getSelectedHistoryLogEntry(state) : null;
+    const historyMatchEntry = state?.isHistoryOpen && state.historyViewMode === HISTORY_VIEW_MODES.LOCAL
+      ? getSelectedHistoryLogEntry(state)
+      : null;
     const selectedEntry = historyMatchEntry || currentMatchEntry;
 
     if (!state || !selectedEntry) {
@@ -5743,6 +6541,8 @@
     const simulateAiMatchCountPicker = document.getElementById("simulate-ai-match-count-picker");
     const simulateAiMatchCountLabel = document.getElementById("simulate-ai-match-count-label");
     const simulateAiMatchCountInput = document.getElementById("simulate-ai-match-count");
+    const playerOneAliasInput = document.getElementById("player-1-human-alias");
+    const playerTwoAliasInput = document.getElementById("player-2-human-alias");
     const restartButton = document.getElementById("restart-button");
     const aiMatchStrip = document.getElementById("ai-match-strip");
     const aiMatchText = document.getElementById("ai-match-text");
@@ -5801,6 +6601,21 @@
         aiSmartButton.classList.toggle("is-selected", isSelected);
         aiSmartButton.setAttribute("aria-pressed", String(isSelected));
       }
+    });
+
+    [
+      { input: playerOneAliasInput, playerIndex: 0 },
+      { input: playerTwoAliasInput, playerIndex: 1 }
+    ].forEach(({ input, playerIndex }) => {
+      if (!input) {
+        return;
+      }
+
+      const normalizedControllers = normalizePlayerControllers(state.playerControllers);
+      const isHuman = normalizedControllers[playerIndex] === PLAYER_CONTROLLER_TYPES.HUMAN;
+      input.disabled = state.isMatchStarted || !isHuman;
+      input.value = normalizeHumanAliases(state.humanAliases)[playerIndex];
+      input.placeholder = getDefaultHumanAlias(playerIndex);
     });
 
     if (startButton) {
@@ -6009,6 +6824,18 @@
   }
 
   function bindUI() {
+    const refreshRemoteHistoryAndRender = () => {
+      const refreshResult = refreshRemoteMatchHistory(gameState);
+      if (isPromiseLike(refreshResult)) {
+        refreshResult.finally(() => {
+          render(gameState);
+        });
+        return;
+      }
+
+      render(gameState);
+    };
+
     document.getElementById("toggle-library-button").addEventListener("click", () => {
       toggleExclusiveSidePanel(gameState, "library");
       gameState.selectedLogEntryId = null;
@@ -6031,7 +6858,29 @@
 
     document.getElementById("toggle-history-button").addEventListener("click", () => {
       toggleExclusiveSidePanel(gameState, "history");
+      if (gameState.isHistoryOpen && gameState.historyViewMode === HISTORY_VIEW_MODES.REMOTE && gameState.remoteMatchHistoryStatus === REMOTE_MATCH_HISTORY_LOAD_STATUSES.IDLE) {
+        refreshRemoteHistoryAndRender();
+        return;
+      }
       render(gameState);
+    });
+
+    document.getElementById("history-local-tab-button").addEventListener("click", () => {
+      gameState.historyViewMode = HISTORY_VIEW_MODES.LOCAL;
+      render(gameState);
+    });
+
+    document.getElementById("history-remote-tab-button").addEventListener("click", () => {
+      gameState.historyViewMode = HISTORY_VIEW_MODES.REMOTE;
+      if (gameState.remoteMatchHistoryStatus === REMOTE_MATCH_HISTORY_LOAD_STATUSES.IDLE) {
+        refreshRemoteHistoryAndRender();
+        return;
+      }
+      render(gameState);
+    });
+
+    document.getElementById("refresh-remote-history-button").addEventListener("click", () => {
+      refreshRemoteHistoryAndRender();
     });
 
     document.getElementById("validate-log-button").addEventListener("click", () => {
@@ -6068,6 +6917,28 @@
         gameState.playerControllers = setSessionPlayerController(playerIndex, controller);
         render(gameState);
       });
+    });
+
+    [
+      { inputId: "player-1-human-alias", playerIndex: 0 },
+      { inputId: "player-2-human-alias", playerIndex: 1 }
+    ].forEach(({ inputId, playerIndex }) => {
+      const input = document.getElementById(inputId);
+      if (!input) {
+        return;
+      }
+
+      const syncAlias = () => {
+        if (gameState.isMatchStarted) {
+          return;
+        }
+
+        gameState.humanAliases = setSessionHumanAlias(playerIndex, input.value);
+        render(gameState);
+      };
+
+      input.addEventListener("input", syncAlias);
+      input.addEventListener("change", syncAlias);
     });
 
     document.querySelectorAll("[data-deck-mode-button]").forEach((button) => {
@@ -6174,8 +7045,29 @@
       cancelHeadlessSimulation();
       cancelAiTurn(gameState);
       gameState = restoreMatchFromHistory(selectedRecord, gameState, {
-        notifyFn: typeof window !== "undefined" ? window.alert.bind(window) : null
+        notifyFn: typeof window !== "undefined" ? window.alert.bind(window) : null,
+        getState: () => gameState,
+        renderFn: render
       });
+      render(gameState);
+    });
+
+    document.getElementById("retry-remote-history-sync-button").addEventListener("click", () => {
+      const selectedRecord = getSelectedHistoryMatch(gameState);
+      if (!selectedRecord) {
+        return;
+      }
+
+      const retryResult = syncSavedMatchRecordToRemote(gameState, selectedRecord.id, {
+        showFeedback: true
+      });
+      if (isPromiseLike(retryResult)) {
+        retryResult.finally(() => {
+          render(gameState);
+        });
+        return;
+      }
+
       render(gameState);
     });
 
@@ -6218,11 +7110,17 @@
       DRAW_COST,
       CARD_COPIES_PER_TYPE,
       SEPARATE_DECK_COPIES_PER_TYPE,
+      APP_VERSION,
       AI_STEP_DELAY_MS,
       HEADLESS_AI_BATCH_SIZE,
       HEADLESS_AI_BATCH_DEFAULT_MATCHES,
       HEADLESS_AI_BATCH_MAX_MATCHES,
       HEADLESS_BATCH_MODES,
+      MATCH_KINDS,
+      REMOTE_MATCH_SYNC_STATUSES,
+      HISTORY_VIEW_MODES,
+      REMOTE_MATCH_HISTORY_LOAD_STATUSES,
+      REMOTE_MATCH_HISTORY_TABLE,
       MATCH_HISTORY_STORAGE_KEY,
       MAX_SAVED_MATCHES,
       MATCH_PRESENTATION_MODES,
@@ -6233,8 +7131,15 @@
       CARD_LIBRARY,
       getSessionPlayerControllers,
       setSessionPlayerController,
+      getSessionHumanAliases,
+      setSessionHumanAliases,
+      setSessionHumanAlias,
       getSessionDeckMode,
       setSessionDeckMode,
+      getMatchKind,
+      getMatchKindLabel,
+      getEffectiveHumanAliases,
+      getRemoteHistoryConfig,
       createDeck,
       shuffleDeck,
       createInitialState,
@@ -6242,10 +7147,16 @@
       saveMatchHistory,
       createSavedMatchRecord,
       archiveCurrentMatchIfNeeded,
+      buildRemoteMatchPayload,
+      fetchRemoteMatchHistory,
+      refreshRemoteMatchHistory,
+      syncSavedMatchRecordToRemote,
       restoreMatchFromHistory,
       getSelectedHistoryMatch,
+      getSelectedRemoteHistoryMatch,
       getSelectedHistoryLogEntry,
       selectHistoryMatch,
+      selectRemoteHistoryMatch,
       getHistoryRestoreTarget,
       startConfiguredMatch,
       createRestartState,

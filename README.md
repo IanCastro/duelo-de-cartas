@@ -39,6 +39,33 @@ A suite deve terminar verde ao rodar `.\run-tests.bat`.
 
 Se algum teste falhar, o ideal e usar a mensagem do erro para localizar a regra quebrada em [game.js](./game.js) ou o cenario correspondente em [game.test.js](./game.test.js).
 
+## Historico remoto via Supabase
+
+O jogo continua salvando o historico local no navegador. Se voce quiser centralizar partidas com participacao humana, configure tambem o historico remoto via Supabase.
+
+Passos minimos:
+
+```sql
+\i ./supabase/played_matches.sql
+```
+
+Depois, edite [remote-history-config.js](./remote-history-config.js) e preencha:
+
+```js
+window.DUELO_REMOTE_HISTORY_CONFIG = Object.freeze({
+  REMOTE_MATCH_HISTORY_ENABLED: true,
+  SUPABASE_URL: "https://SEU-PROJETO.supabase.co",
+  SUPABASE_ANON_KEY: "SUA_CHAVE_ANON"
+});
+```
+
+Quando essa configuracao estiver ativa:
+
+- partidas `humano x humano` e `humano x IA` encerradas ou abandonadas tentam sincronizar para o Supabase;
+- `IA x IA` continua fora do historico remoto;
+- o menu `Historico` passa a mostrar abas `Local` e `Remoto`;
+- o remoto e somente leitura nesta primeira versao.
+
 ## Estrutura principal
 
 - [index.html](./index.html): estrutura da interface

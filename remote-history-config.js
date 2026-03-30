@@ -1,0 +1,5 @@
+window.DUELO_REMOTE_HISTORY_CONFIG = Object.freeze({
+  REMOTE_MATCH_HISTORY_ENABLED: false,
+  SUPABASE_URL: "",
+  SUPABASE_ANON_KEY: ""
+});

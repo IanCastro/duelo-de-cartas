@@ -118,6 +118,15 @@ function createSeededRng(seed) {
   };
 }
 
+function createRemoteHistoryConfig(overrides = {}) {
+  return {
+    REMOTE_MATCH_HISTORY_ENABLED: true,
+    SUPABASE_URL: "https://demo-project.supabase.co",
+    SUPABASE_ANON_KEY: "demo-anon-key",
+    ...overrides
+  };
+}
+
 function runHeadlessBatchToCompletion(state, batchSize = 120, guardLimit = 4000) {
   let guard = 0;
 
@@ -585,6 +594,174 @@ test("failing to persist the history keeps the record in memory, allows retry, a
   assert(state.matchHistory[0].id === state.currentMatchId, "the in-memory history should keep the live match record available");
   assert(secondResult.archived === true && secondResult.persisted === false, "retrying after a failed persistence should try to archive again");
   assert(notifications.length === 2, "each failed persistence attempt should notify the user");
+});
+
+test("human match archives include app version, aliases, and pending remote sync metadata", () => {
+  const storage = createMemoryStorage();
+  const remoteHistoryConfig = createRemoteHistoryConfig();
+  const state = createStartedState({
+    playerControllers: [game.PLAYER_CONTROLLER_TYPES.HUMAN, game.PLAYER_CONTROLLER_TYPES.AI_BASE]
+  });
+  state.humanAliases = ["Alice", ""];
+
+  const archiveResult = game.archiveCurrentMatchIfNeeded(state, "abandoned", {
+    storage,
+    remoteHistoryConfig
+  });
+  const savedRecord = state.matchHistory[0];
+
+  assert(archiveResult.archived === true, "human matches should still archive locally");
+  assert(savedRecord.appVersion === game.APP_VERSION, "archived matches should carry the app version");
+  assert(savedRecord.matchKind === game.MATCH_KINDS.HUMAN_AI, "archived matches should carry the human-vs-ai kind");
+  assert(savedRecord.humanAliases[0] === "Alice", "archived matches should keep the typed human alias");
+  assert(savedRecord.humanAliases[1] === null, "non-human seats should stay null in stored aliases");
+  assert(savedRecord.remoteEligible === true, "human participation should make the match eligible for remote sync");
+  assert(savedRecord.remoteSyncStatus === game.REMOTE_MATCH_SYNC_STATUSES.PENDING, "eligible matches should start pending for remote sync");
+});
+
+test("ai-vs-ai archives stay local-only even when remote history is configured", () => {
+  const storage = createMemoryStorage();
+  const remoteHistoryConfig = createRemoteHistoryConfig();
+  const state = createStartedState({
+    playerControllers: [game.PLAYER_CONTROLLER_TYPES.AI_BASE, game.PLAYER_CONTROLLER_TYPES.AI_SMART]
+  });
+
+  const archiveResult = game.archiveCurrentMatchIfNeeded(state, "abandoned", {
+    storage,
+    remoteHistoryConfig
+  });
+  const savedRecord = state.matchHistory[0];
+  const syncResult = game.syncSavedMatchRecordToRemote(state, savedRecord.id, {
+    storage,
+    remoteHistoryConfig,
+    fetch() {
+      throw new Error("fetch should not run for ai-vs-ai history");
+    }
+  });
+
+  assert(archiveResult.archived === true, "ai-vs-ai matches should still archive locally");
+  assert(savedRecord.remoteEligible === false, "ai-vs-ai matches should not be eligible for remote sync");
+  assert(savedRecord.remoteSyncStatus === null, "ai-vs-ai matches should not enter remote sync states");
+  assert(syncResult === false, "remote sync helper should bail out for ineligible matches");
+});
+
+test("remote sync success updates the local record with synced metadata", () => {
+  const storage = createMemoryStorage();
+  const remoteHistoryConfig = createRemoteHistoryConfig();
+  const state = createStartedState({
+    playerControllers: [game.PLAYER_CONTROLLER_TYPES.HUMAN, game.PLAYER_CONTROLLER_TYPES.AI_BASE]
+  });
+  state.humanAliases = ["Alice", ""];
+
+  game.archiveCurrentMatchIfNeeded(state, "abandoned", {
+    storage,
+    remoteHistoryConfig
+  });
+
+  let postedBody = null;
+  const syncResult = game.syncSavedMatchRecordToRemote(state, state.currentMatchId, {
+    storage,
+    remoteHistoryConfig,
+    fetch(url, options) {
+      postedBody = { url, options };
+      return {
+        ok: true,
+        json() {
+          return [{ id: "remote-match-1" }];
+        }
+      };
+    }
+  });
+  const savedRecord = state.matchHistory[0];
+  const payload = JSON.parse(postedBody.options.body);
+
+  assert(syncResult === true, "successful remote sync should report success");
+  assert(postedBody.url.includes("/rest/v1/played_matches"), "remote sync should post to the configured played_matches table");
+  assert(payload.app_version === game.APP_VERSION, "remote payload should include the app version");
+  assert(payload.human_aliases[0] === "Alice", "remote payload should include the effective human alias");
+  assert(payload.record.appVersion === game.APP_VERSION, "embedded remote record should also include the app version");
+  assert(savedRecord.remoteSyncStatus === game.REMOTE_MATCH_SYNC_STATUSES.SYNCED, "successful sync should mark the record as synced");
+  assert(savedRecord.remoteRecordId === "remote-match-1", "successful sync should remember the remote row id");
+  assert(savedRecord.remoteSyncError === null, "successful sync should clear sync errors");
+});
+
+test("remote sync failure preserves local history and marks the record as failed", () => {
+  const storage = createMemoryStorage();
+  const remoteHistoryConfig = createRemoteHistoryConfig();
+  const state = createStartedState({
+    playerControllers: [game.PLAYER_CONTROLLER_TYPES.HUMAN, game.PLAYER_CONTROLLER_TYPES.AI_BASE]
+  });
+
+  game.archiveCurrentMatchIfNeeded(state, "abandoned", {
+    storage,
+    remoteHistoryConfig
+  });
+
+  const syncResult = game.syncSavedMatchRecordToRemote(state, state.currentMatchId, {
+    storage,
+    remoteHistoryConfig,
+    fetch() {
+      return {
+        ok: false,
+        status: 503,
+        json() {
+          return [];
+        }
+      };
+    }
+  });
+  const savedRecord = state.matchHistory[0];
+
+  assert(syncResult === false, "failed remote sync should report failure");
+  assert(state.matchHistory.length === 1, "failed remote sync should not remove the local history entry");
+  assert(savedRecord.remoteSyncStatus === game.REMOTE_MATCH_SYNC_STATUSES.FAILED, "failed remote sync should mark the record as failed");
+  assert(typeof savedRecord.remoteSyncError === "string" && savedRecord.remoteSyncError.includes("503"), "failed remote sync should keep an actionable error message");
+});
+
+test("remote history fetch loads normalized records and selects the newest remote match", () => {
+  const remoteHistoryConfig = createRemoteHistoryConfig();
+  const sourceState = createStartedState({
+    playerControllers: [game.PLAYER_CONTROLLER_TYPES.HUMAN, game.PLAYER_CONTROLLER_TYPES.AI_BASE]
+  });
+  sourceState.humanAliases = ["Alice", ""];
+  const localRecord = game.createSavedMatchRecord(sourceState, "finished");
+  const remotePayload = game.buildRemoteMatchPayload(localRecord);
+  const state = game.createInitialState();
+
+  const refreshResult = game.refreshRemoteMatchHistory(state, {
+    remoteHistoryConfig,
+    fetch() {
+      return {
+        ok: true,
+        json() {
+          return [{
+            id: "remote-row-1",
+            created_at: "2026-03-30T18:00:00.000Z",
+            ...remotePayload
+          }];
+        }
+      };
+    }
+  });
+
+  assert(Array.isArray(refreshResult) && refreshResult.length === 1, "remote refresh should return the loaded remote records");
+  assert(state.remoteMatchHistoryStatus === game.REMOTE_MATCH_HISTORY_LOAD_STATUSES.READY, "remote refresh should mark the state as ready");
+  assert(state.remoteMatchHistory.length === 1, "remote refresh should store the loaded matches");
+  assert(state.selectedRemoteHistoryMatchId === state.remoteMatchHistory[0].id, "remote refresh should select the newest loaded match by default");
+  assert(state.remoteMatchHistory[0].appVersion === game.APP_VERSION, "remote refresh should preserve the remote app version");
+  assert(state.remoteMatchHistory[0].humanAliases[0] === "Alice", "remote refresh should preserve remote human aliases");
+  assert(state.remoteMatchHistory[0].remoteSyncStatus === game.REMOTE_MATCH_SYNC_STATUSES.SYNCED, "remote rows should be normalized as synced");
+  assert(state.remoteMatchHistory[0].remoteRecordId === "remote-row-1", "remote refresh should preserve the remote row identifier separately");
+});
+
+test("remote history refresh fails cleanly when remote config is absent", () => {
+  const state = game.createInitialState();
+  const refreshResult = game.refreshRemoteMatchHistory(state);
+
+  assert(refreshResult === false, "refresh should fail fast without remote config");
+  assert(state.remoteMatchHistoryStatus === game.REMOTE_MATCH_HISTORY_LOAD_STATUSES.FAILED, "state should mark remote history as failed when config is missing");
+  assert(typeof state.remoteMatchHistoryError === "string" && state.remoteMatchHistoryError.includes("desativado"), "state should keep a helpful remote config error");
+  assert(state.remoteMatchHistory.length === 0, "state should keep remote history empty on config failure");
 });
 
 test("pre-game blocks shortcuts and gameplay actions until Start", () => {
@@ -2425,8 +2602,10 @@ test("layout markup removes the cancel button and keeps a pending effect slot", 
   assert(html.includes("id=\"player-1-controller-human\""), "the config panel should expose a controller toggle for player 1");
   assert(html.includes("id=\"player-1-controller-ai-base\""), "the config panel should expose the base ai option for player 1");
   assert(html.includes("id=\"player-1-controller-ai-smart\""), "the config panel should expose the smart ai option for player 1");
+  assert(html.includes("id=\"player-1-human-alias\""), "the config panel should expose a human alias input for Sentinela Azul");
   assert(html.includes("id=\"player-2-controller-ai-base\""), "the config panel should expose the base ai option for player 2");
   assert(html.includes("id=\"player-2-controller-ai-smart\""), "the config panel should expose the smart ai option for player 2");
+  assert(html.includes("id=\"player-2-human-alias\""), "the config panel should expose a human alias input for Guardiao Rubro");
   assert(html.includes(">Sentinela Azul<"), "the interface should expose Sentinela Azul instead of the old player 1 label");
   assert(html.includes(">Guardiao Rubro<"), "the interface should expose Guardiao Rubro instead of the old player 2 label");
   assert(!html.includes(">Jogador 1<"), "the interface should no longer render the Jogador 1 label");
@@ -2459,8 +2638,14 @@ test("layout markup removes the cancel button and keeps a pending effect slot", 
   assert(html.includes("id=\"log-validation-status\""), "the log panel should expose a validation status chip");
   assert(html.includes("id=\"toggle-history-button\""), "the top menu should expose a dedicated history button");
   assert(html.includes("id=\"history-panel\""), "the side rail should expose a dedicated history panel");
+  assert(html.includes("id=\"history-local-tab-button\""), "the history panel should expose a local tab");
+  assert(html.includes("id=\"history-remote-tab-button\""), "the history panel should expose a remote tab");
+  assert(html.includes("id=\"refresh-remote-history-button\""), "the history panel should expose a remote refresh action");
   assert(html.includes("id=\"match-history-list\""), "the history panel should expose the saved match list");
+  assert(html.includes("id=\"retry-remote-history-sync-button\""), "the history panel should expose a manual retry action for failed remote syncs");
+  assert(html.includes("id=\"remote-history-sync-feedback\""), "the history panel should expose feedback for remote sync attempts");
   assert(html.includes("id=\"restore-history-match-button\""), "the history panel should expose a restore action");
+  assert(html.includes("remote-history-config.js"), "the page should load the optional remote history config before game.js");
   assert(html.includes("compact-action-button"), "turn action buttons should use the compact button style");
   assert(html.includes("pressione Esc para voltar ao presente"), "rules should describe how to leave history view without dedicated buttons");
   assert(html.includes("so comeca quando voce clicar em Start"), "rules should describe the pre-game Start flow");
@@ -2478,7 +2663,11 @@ test("layout markup removes the cancel button and keeps a pending effect slot", 
   assert(html.includes("placar final"), "rules should mention that ai-vs-ai batches end with a final scoreboard");
   assert(html.includes("Validar log"), "rules should mention the manual log validation flow");
   assert(html.includes("Use Historico para revisar partidas encerradas ou abandonadas"), "rules should mention the persistent match history flow");
+  assert(html.includes("historico remoto"), "rules should mention the optional remote history view");
   assert(!css.includes(".card-defense-toggle"), "styles should no longer keep the removed defense toggle button");
+  assert(css.includes(".controller-text-input"), "styles should cover the human alias input");
+  assert(css.includes(".history-toolbar"), "styles should cover the local/remote history toolbar");
+  assert(css.includes(".remote-history-sync-feedback"), "styles should cover remote sync feedback states");
 });
 
 test("estandarte de guerra now costs 5 mana", () => {

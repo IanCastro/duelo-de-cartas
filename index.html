@@ -51,6 +51,8 @@
             <button id="player-1-controller-ai-base" class="controller-option" type="button" data-controller-button data-player-index="0" data-controller="ai_base" aria-pressed="false">IA Base</button>
             <button id="player-1-controller-ai-smart" class="controller-option" type="button" data-controller-button data-player-index="0" data-controller="ai_smart" aria-pressed="false">IA Nova</button>
           </div>
+          <label class="controller-picker-label alias-picker-label" for="player-1-human-alias">Apelido humano</label>
+          <input id="player-1-human-alias" class="controller-text-input" type="text" maxlength="40" placeholder="Humano Azul">
         </div>
 
         <div class="controller-picker">
@@ -60,6 +62,8 @@
             <button id="player-2-controller-ai-base" class="controller-option" type="button" data-controller-button data-player-index="1" data-controller="ai_base" aria-pressed="true">IA Base</button>
             <button id="player-2-controller-ai-smart" class="controller-option" type="button" data-controller-button data-player-index="1" data-controller="ai_smart" aria-pressed="false">IA Nova</button>
           </div>
+          <label class="controller-picker-label alias-picker-label" for="player-2-human-alias">Apelido humano</label>
+          <input id="player-2-human-alias" class="controller-text-input" type="text" maxlength="40" placeholder="Humano Rubro">
         </div>
 
         <div class="controller-picker deck-mode-picker">
@@ -300,7 +304,7 @@
           <p>Cada unidade pode atacar no turno em que entra em campo e depois 1 vez por turno. Se o rival nao tiver unidades em campo, voce pode destruir um suporte com 1 ataque. Reparo Rapido so pode curar alvos feridos.</p>
           <p>No Log, clique em uma linha para ver aquele momento antigo no tabuleiro em modo somente leitura. Clique novamente na mesma linha para voltar para aquele momento com confirmacao, ou clique na linha mais recente ou pressione Esc para voltar ao presente.</p>
           <p>Use o botao Validar log no proprio menu de Log para rodar um replay completo e verificar se o historico da partida ficou consistente.</p>
-          <p>Use Historico para revisar partidas encerradas ou abandonadas salvas no navegador e restaurar uma delas como partida atual quando quiser continuar daquele ponto.</p>
+          <p>Use Historico para revisar partidas encerradas ou abandonadas salvas no navegador. Quando o historico remoto estiver configurado, partidas com participacao humana tambem podem aparecer em uma aba remota somente leitura.</p>
         </section>
 
         <section class="side-panel log-panel" id="log-panel" aria-hidden="true">
@@ -325,6 +329,13 @@
             <span>Historico</span>
             <span id="history-match-count">0 partidas</span>
           </div>
+          <div class="history-toolbar">
+            <div class="history-tabs">
+              <button id="history-local-tab-button" class="controller-option is-selected" type="button" aria-pressed="true">Local</button>
+              <button id="history-remote-tab-button" class="controller-option" type="button" aria-pressed="false">Remoto</button>
+            </div>
+            <button id="refresh-remote-history-button" class="action-button secondary" type="button" hidden>Atualizar remoto</button>
+          </div>
           <div id="match-history-list" class="match-history-list"></div>
           <div id="history-match-details" class="history-match-details" hidden>
             <div class="history-match-summary">
@@ -332,9 +343,13 @@
                 <p class="turn-label">Partida selecionada</p>
                 <h3 id="history-match-title">Partida</h3>
               </div>
-              <button id="restore-history-match-button" class="action-button secondary" type="button">Restaurar como partida atual</button>
+              <div class="history-match-actions">
+                <button id="retry-remote-history-sync-button" class="action-button secondary" type="button" hidden>Reenviar ao remoto</button>
+                <button id="restore-history-match-button" class="action-button secondary" type="button">Restaurar como partida atual</button>
+              </div>
             </div>
             <p id="history-match-meta" class="history-match-meta"></p>
+            <div id="remote-history-sync-feedback" class="remote-history-sync-feedback" hidden aria-live="polite"></div>
             <div id="history-log" class="history-log"></div>
           </div>
         </section>
@@ -363,6 +378,7 @@
     </div>
   </main>
 
+  <script src="remote-history-config.js"></script>
   <script src="game.js"></script>
 </body>
 </html>
