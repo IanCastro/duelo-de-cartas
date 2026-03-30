@@ -127,6 +127,104 @@ function createRemoteHistoryConfig(overrides = {}) {
   };
 }
 
+function createFakeDomElement(tagName = "div") {
+  const element = {
+    tagName: String(tagName).toUpperCase(),
+    className: "",
+    hidden: false,
+    disabled: false,
+    children: [],
+    attributes: {},
+    listeners: {},
+    appendChild(node) {
+      this.children.push(node);
+      return node;
+    },
+    addEventListener(type, handler) {
+      this.listeners[type] = handler;
+    },
+    setAttribute(name, value) {
+      this.attributes[name] = String(value);
+    },
+    getAttribute(name) {
+      return Object.prototype.hasOwnProperty.call(this.attributes, name)
+        ? this.attributes[name]
+        : null;
+    }
+  };
+
+  let innerHTMLValue = "";
+  Object.defineProperty(element, "innerHTML", {
+    get() {
+      return innerHTMLValue;
+    },
+    set(value) {
+      innerHTMLValue = String(value);
+      if (innerHTMLValue === "") {
+        element.children = [];
+      }
+    }
+  });
+
+  let textContentValue = "";
+  Object.defineProperty(element, "textContent", {
+    get() {
+      return textContentValue;
+    },
+    set(value) {
+      textContentValue = String(value);
+    }
+  });
+
+  element.classList = {
+    toggle(className, force) {
+      const classes = new Set(element.className.split(/\s+/).filter(Boolean));
+      const shouldHave = force === undefined ? !classes.has(className) : Boolean(force);
+      if (shouldHave) {
+        classes.add(className);
+      } else {
+        classes.delete(className);
+      }
+      element.className = Array.from(classes).join(" ");
+      return shouldHave;
+    }
+  };
+
+  return element;
+}
+
+function createHistoryRenderDocument() {
+  const elements = {};
+  [
+    "history-match-count",
+    "match-history-list",
+    "history-match-details",
+    "history-match-title",
+    "history-match-meta",
+    "history-log",
+    "restore-history-match-button",
+    "history-local-tab-button",
+    "history-remote-tab-button",
+    "refresh-remote-history-button",
+    "retry-remote-history-sync-button",
+    "remote-history-sync-feedback"
+  ].forEach((id) => {
+    elements[id] = createFakeDomElement(id.includes("button") ? "button" : "div");
+  });
+
+  return {
+    elements,
+    document: {
+      getElementById(id) {
+        return elements[id] || null;
+      },
+      createElement(tagName) {
+        return createFakeDomElement(tagName);
+      }
+    }
+  };
+}
+
 function runHeadlessBatchToCompletion(state, batchSize = 120, guardLimit = 4000) {
   let guard = 0;
 
@@ -2580,6 +2678,7 @@ test("canceling prepared direct damage refunds mana and returns the card to hand
 test("layout markup removes the cancel button and keeps a pending effect slot", () => {
   const html = fs.readFileSync(path.join(process.cwd(), "index.html"), "utf8");
   const css = fs.readFileSync(path.join(process.cwd(), "styles.css"), "utf8");
+  const gameSource = fs.readFileSync(path.join(process.cwd(), "game.js"), "utf8");
 
   assert(!html.includes("cancel-attack-button"), "cancel button should be removed from the markup");
   assert(html.includes("player-1-pending-slot"), "active player area should expose a pending effect slot");
@@ -2668,6 +2767,84 @@ test("layout markup removes the cancel button and keeps a pending effect slot", 
   assert(css.includes(".controller-text-input"), "styles should cover the human alias input");
   assert(css.includes(".history-toolbar"), "styles should cover the local/remote history toolbar");
   assert(css.includes(".remote-history-sync-feedback"), "styles should cover remote sync feedback states");
+  assert((gameSource.match(/function renderMatchHistory\(/g) || []).length === 1, "history rendering should keep a single active renderMatchHistory implementation");
+  assert(!gameSource.includes("function renderMatchHistoryLegacy("), "history rendering should no longer keep the obsolete legacy renderer");
+});
+
+test("history renderer switches the panel into the remote loading state", () => {
+  const state = game.createInitialState();
+  state.historyViewMode = game.HISTORY_VIEW_MODES.REMOTE;
+  state.remoteMatchHistoryStatus = game.REMOTE_MATCH_HISTORY_LOAD_STATUSES.LOADING;
+  const { document: fakeDocument, elements } = createHistoryRenderDocument();
+  const previousDocument = global.document;
+  const previousWindow = global.window;
+
+  global.document = fakeDocument;
+  global.window = {
+    DUELO_REMOTE_HISTORY_CONFIG: createRemoteHistoryConfig()
+  };
+
+  try {
+    game.renderMatchHistory(state);
+  } finally {
+    global.document = previousDocument;
+    global.window = previousWindow;
+  }
+
+  assert(elements["history-remote-tab-button"].className.includes("is-selected"), "remote tab should look selected when the remote history view is active");
+  assert(elements["history-local-tab-button"].getAttribute("aria-pressed") === "false", "local tab should no longer be pressed in the remote view");
+  assert(elements["history-remote-tab-button"].getAttribute("aria-pressed") === "true", "remote tab should report itself as pressed");
+  assert(elements["refresh-remote-history-button"].hidden === false, "remote view should reveal the manual refresh button");
+  assert(elements["refresh-remote-history-button"].disabled === true, "loading remote history should temporarily disable the refresh button");
+  assert(elements["history-match-count"].textContent === "Carregando remoto...", "remote loading should expose the loading label in the history header");
+  assert(elements["match-history-list"].children.length === 1, "remote loading should render a single loading placeholder");
+  assert(elements["match-history-list"].children[0].textContent.includes("Carregando partidas do historico remoto"), "remote loading should explain that remote matches are being fetched");
+  assert(elements["history-match-details"].hidden === true, "loading remote history should hide the details panel");
+});
+
+test("history renderer shows remote errors and read-only remote match details", () => {
+  const sourceState = createStartedState({
+    playerControllers: [game.PLAYER_CONTROLLER_TYPES.HUMAN, game.PLAYER_CONTROLLER_TYPES.AI_BASE]
+  });
+  sourceState.humanAliases = ["Alice", ""];
+  const remoteRecord = game.createSavedMatchRecord(sourceState, "finished");
+  remoteRecord.id = "remote-record";
+  const { document: fakeDocument, elements } = createHistoryRenderDocument();
+  const previousDocument = global.document;
+  const previousWindow = global.window;
+
+  global.document = fakeDocument;
+  global.window = {
+    DUELO_REMOTE_HISTORY_CONFIG: createRemoteHistoryConfig()
+  };
+
+  try {
+    const failedState = game.createInitialState();
+    failedState.historyViewMode = game.HISTORY_VIEW_MODES.REMOTE;
+    failedState.remoteMatchHistoryStatus = game.REMOTE_MATCH_HISTORY_LOAD_STATUSES.FAILED;
+    failedState.remoteMatchHistoryError = "Falha ao carregar o historico remoto.";
+    game.renderMatchHistory(failedState);
+
+    assert(elements["history-match-count"].textContent === "Historico remoto", "remote failures should keep the remote history label");
+    assert(elements["match-history-list"].children[0].textContent === "Falha ao carregar o historico remoto.", "remote failures should surface the actual error message");
+
+    const readyState = game.createInitialState();
+    readyState.historyViewMode = game.HISTORY_VIEW_MODES.REMOTE;
+    readyState.remoteMatchHistoryStatus = game.REMOTE_MATCH_HISTORY_LOAD_STATUSES.READY;
+    readyState.remoteMatchHistory = [remoteRecord];
+    readyState.selectedRemoteHistoryMatchId = remoteRecord.id;
+    game.renderMatchHistory(readyState);
+  } finally {
+    global.document = previousDocument;
+    global.window = previousWindow;
+  }
+
+  assert(elements["history-match-count"].textContent === "1 partida(s) remotas", "ready remote history should show the remote match count");
+  assert(elements["match-history-list"].children.length === 1, "ready remote history should render the remote match list");
+  assert(elements["history-match-details"].hidden === false, "ready remote history should show the selected remote match details");
+  assert(elements["restore-history-match-button"].hidden === true, "remote records should stay read-only and hide the restore button");
+  assert(elements["history-log"].children.length === remoteRecord.log.length, "remote details should render the full read-only remote log");
+  assert(elements["history-log"].children[0].className.includes("is-read-only"), "remote log entries should be marked as read-only");
 });
 
 test("estandarte de guerra now costs 5 mana", () => {

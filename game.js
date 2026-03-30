@@ -5857,7 +5857,7 @@
     return selectedRecord;
   }
 
-  function renderMatchHistory(state) {
+  function renderMatchHistoryLocalOnly(state) {
     const historyCount = document.getElementById("history-match-count");
     const historyList = document.getElementById("match-history-list");
     const historyDetails = document.getElementById("history-match-details");
@@ -5939,7 +5939,7 @@
     });
   }
 
-  function renderMatchHistoryLegacy(state) {
+  function renderMatchHistory(state) {
     const historyCount = document.getElementById("history-match-count");
     const historyList = document.getElementById("match-history-list");
     const historyDetails = document.getElementById("history-match-details");
@@ -7157,6 +7157,7 @@
       getSelectedHistoryLogEntry,
       selectHistoryMatch,
       selectRemoteHistoryMatch,
+      renderMatchHistory,
       getHistoryRestoreTarget,
       startConfiguredMatch,
       createRestartState,
